@@ -14,6 +14,13 @@ const { publicUrl } = await tk.startQuick({ port: 3000 });
 console.log(publicUrl); // https://random-words.trycloudflare.com
 ```
 
+…or straight from your terminal, no code required:
+
+```sh
+npm i -g tunnelkit      # or: bun add -g tunnelkit
+tunnelkit quick 3000    # → https://random-words.trycloudflare.com
+```
+
 ## Why tunnelkit
 
 - **All three tunnel modes**, first-class: Quick, Remote (token), and Local (named).
@@ -21,6 +28,7 @@ console.log(publicUrl); // https://random-words.trycloudflare.com
 - **Fully typed**, including events. `TunnelKit` and `CloudflaredTunnel` are typed `EventEmitter`s.
 - **Manages the binary** — download `cloudflared` on demand, or reuse one already on `PATH`.
 - **Optional persistence** (`TunnelStore`) when you want it; stateless core when you don't.
+- **Ships a CLI** — the same capabilities from your terminal via `tunnelkit <command>`.
 
 ## Feature matrix
 
@@ -35,15 +43,25 @@ console.log(publicUrl); // https://random-words.trycloudflare.com
 | Binary install / status | `installBinary` / `isBinaryInstalled` / `getBinaryStatus` |
 | Config persistence | `TunnelStore` (optional) |
 | Low-level process control | `CloudflaredTunnel` |
+| Terminal usage | `tunnelkit` CLI ([docs](./docs/cli.md)) |
 
 ## Install
+
+As a library:
 
 ```sh
 bun add tunnelkit
 # or: npm install tunnelkit
 ```
 
-You also need the `cloudflared` binary. tunnelkit can download it (`installBinary()`), or use one already on your `PATH` (brew/apt/winget).
+Or globally, for the CLI:
+
+```sh
+bun add -g tunnelkit
+# or: npm i -g tunnelkit
+```
+
+You also need the `cloudflared` binary. tunnelkit can download it (`installBinary()` / `tunnelkit install`), or use one already on your `PATH` (brew/apt/winget).
 
 ## The three modes
 
@@ -91,6 +109,24 @@ await tk.startLocal({
 ```
 
 `createTunnel` includes orphan recovery: if a same-named tunnel exists on Cloudflare but isn't known locally and has no active connections, it's deleted and the create retried. Guard tunnels you track with the `isTunnelKnown` option.
+
+## CLI
+
+Installing globally puts a `tunnelkit` command on your `PATH` that drives the same three modes — no code required.
+
+```sh
+tunnelkit quick 3000                                  # quick TryCloudflare tunnel
+tunnelkit quick 8080 --auto-stop 30                   # auto-stop after 30 min
+tunnelkit remote --token "$CF_TUNNEL_TOKEN"           # token-based tunnel
+tunnelkit login                                       # authenticate (named tunnels)
+tunnelkit local my-app --route app.example.com=http://localhost:3000
+tunnelkit list                                        # named tunnels on your account
+tunnelkit install                                     # download cloudflared
+tunnelkit status                                      # binary status
+tunnelkit help
+```
+
+Run commands like `quick`, `remote`, and `local` stay in the foreground and shut the tunnel down cleanly on `Ctrl+C`. The binary is downloaded automatically on first use if it isn't already available. See [`docs/cli.md`](./docs/cli.md) for every command and flag.
 
 ## Events
 
@@ -203,6 +239,7 @@ bun run examples/quick.ts 3000
 
 ## Documentation
 
+- [CLI reference](./docs/cli.md) — every command, option, and example for the `tunnelkit` CLI.
 - [API reference](./docs/api.md) — every export, option, method, and event.
 - [Examples](./examples/README.md) — case-by-case runnable scenarios.
 

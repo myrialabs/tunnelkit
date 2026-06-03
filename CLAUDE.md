@@ -9,7 +9,8 @@ Guidelines for Claude Code when working on **tunnelkit**.
 tunnelkit is a **zero-dependency, TypeScript-native library** that wraps the
 `cloudflared` binary and exposes a typed API over the three Cloudflare Tunnel
 modes (Quick, Remote, Local). It runs on **Node 18+ and Bun**. It is consumed
-as a library by host applications — there is no app, server, or UI here.
+as a library by host applications, and also ships a thin `tunnelkit` CLI
+(`src/cli.ts` → `dist/cli.js`, the package `bin`) for terminal use.
 
 ---
 
@@ -26,13 +27,17 @@ as a library by host applications — there is no app, server, or UI here.
   `CloudflaredTunnel` (low-level wrapper), `TunnelStore` (optional persistence),
   `binary.ts` (resolve/install), shared `types.ts` / `logger.ts`.
 - The library never logs on its own — route diagnostics through the optional
-  `Logger` interface. Never use `console.*` in `src/`.
+  `Logger` interface. The library core must not write to the terminal directly.
+  `src/cli.ts` is the one terminal-facing entry: it may write to
+  `process.stdout` / `process.stderr` (it is the CLI), but everything else in
+  `src/` stays silent.
 
 ### After coding
 
 - Run `bun run typecheck`, `bun run lint`, and `bun run test`.
 - Run `bun run build` and confirm `dist/` emits cleanly.
 - If you changed the public API, update `README.md` and `docs/api.md`.
+- If you changed the CLI, update `README.md` and `docs/cli.md`.
 - Add a `*.test.ts` next to non-trivial logic (parsers, path/arg building,
   store round-trips) using `bun:test`.
 - Do NOT create `.md` files unless asked.
@@ -50,6 +55,9 @@ as a library by host applications — there is no app, server, or UI here.
   `TunnelKit`.
 - **`src/binary.ts`** — binary resolution (managed dir → PATH) and download.
 - **`src/which.ts`** — cross-runtime PATH lookup (no `Bun.which`).
+- **`src/cli.ts`** — the `tunnelkit` CLI entry (the package `bin`). Thin wrapper
+  over `TunnelKit`; the only file that writes to the terminal directly.
+- **`src/cli-args.ts`** — pure, tested argv parser used by the CLI.
 
 ---
 
@@ -75,5 +83,6 @@ as a library by host applications — there is no app, server, or UI here.
 
 - ❌ Add a runtime dependency without discussion
 - ❌ Use Bun-only or Node-only APIs in `src/`
-- ❌ Use `console.*` in `src/`
+- ❌ Write to the terminal from the library core (everything in `src/` except
+  `src/cli.ts`) — no `console.*`, no `process.stdout`/`stderr`
 - ❌ Create docs/.md files without request

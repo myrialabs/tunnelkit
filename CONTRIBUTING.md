@@ -54,8 +54,8 @@ These are non-negotiable — a PR that breaks one needs explicit discussion firs
 
 - **Zero runtime dependencies.** Use only Node built-ins. This is the library's headline property.
 - **Cross-runtime.** No Bun-only or Node-only APIs in `src/`. Abstract anything runtime-specific (see `src/which.ts`).
-- **No self-logging.** The library is silent unless given a `Logger`. Never use `console.*` in `src/`.
-- **Public API changes are documented.** Update `README.md` and `docs/api.md` in the same PR.
+- **No self-logging.** The library core is silent unless given a `Logger`. Don't write to the terminal from `src/` — the sole exception is `src/cli.ts`, the CLI entry, which legitimately writes to `process.stdout`/`stderr`.
+- **Public API changes are documented.** Update `README.md` and `docs/api.md` in the same PR. CLI changes go in `README.md` and `docs/cli.md`.
 
 ---
 
@@ -115,7 +115,7 @@ docs(readme): add cloudflared comparison
 chore: bump typescript-eslint
 ```
 
-Common scopes: `manager`, `tunnel`, `store`, `binary`, `which`, `readme`, `examples`.
+Common scopes: `manager`, `tunnel`, `store`, `binary`, `which`, `cli`, `readme`, `examples`.
 
 ### Pre-commit Checklist
 
@@ -123,9 +123,9 @@ Common scopes: `manager`, `tunnel`, `store`, `binary`, `which`, `readme`, `examp
 - [ ] `bun run lint` passes
 - [ ] `bun run test` passes
 - [ ] `bun run build` emits `dist/` cleanly
-- [ ] Public API change reflected in `README.md` + `docs/api.md`
+- [ ] Public API change reflected in `README.md` + `docs/api.md` (CLI change → `docs/cli.md`)
 - [ ] No new runtime dependency (or it was discussed)
-- [ ] No `console.*` in `src/`
+- [ ] No terminal writes from the library core (`src/` except `src/cli.ts`)
 
 ### Pull Request Format
 

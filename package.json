@@ -11,6 +11,9 @@
   },
   "types": "./dist/index.d.ts",
   "main": "./dist/index.js",
+  "bin": {
+    "tunnelkit": "./dist/cli.js"
+  },
   "files": [
     "dist",
     "README.md",
@@ -36,6 +39,7 @@
     "quick-tunnel",
     "ngrok-alternative",
     "reverse-proxy",
+    "cli",
     "bun",
     "typescript"
   ],

@@ -1,5 +1,8 @@
 # tunnelkit API reference
 
+This page documents the programmatic API. For the terminal command, see the
+[CLI reference](./cli.md).
+
 All exports come from the package root: `import { … } from 'tunnelkit'`.
 
 - [`TunnelKit`](#tunnelmanager)
