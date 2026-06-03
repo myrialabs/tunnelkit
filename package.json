@@ -1,6 +1,6 @@
 {
   "name": "tunnelkit",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Zero-dependency, TypeScript-native toolkit for running Cloudflare Tunnels (Quick, Remote, and Local) from Node or Bun.",
   "type": "module",
   "exports": {
