@@ -1,0 +1,215 @@
+# tunnelkit API reference
+
+All exports come from the package root: `import { … } from 'tunnelkit'`.
+
+- [`TunnelKit`](#tunnelmanager)
+- [`TunnelStore`](#tunnelstore)
+- [`CloudflaredTunnel`](#cloudflaredtunnel)
+- [Binary functions](#binary-functions)
+- [Utilities & types](#utilities--types)
+
+---
+
+## TunnelKit
+
+High-level orchestration over all three tunnel modes. A typed `EventEmitter`.
+
+```ts
+new TunnelKit(options?: TunnelKitOptions)
+```
+
+### TunnelKitOptions
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `dataDir` | `string` | `~/.tunnelkit` | Holds `cert.pem`, credentials, generated configs. |
+| `installDir` | `string` | `~/.tunnelkit/bin` | Managed cloudflared binary location. |
+| `logger` | `Logger` | silent | `{ log?, warn?, error? }`; pass `console` for output. |
+| `quickTimeoutMs` | `number` | `30000` | Timeout waiting for a quick-tunnel URL. |
+| `connectTimeoutMs` | `number` | `60000` | Timeout waiting for remote/local connection. |
+| `isTunnelKnown` | `(tunnelId: string) => boolean` | `() => false` | Protects tunnels you track from orphan cleanup. |
+
+### Binary methods
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `isBinaryInstalled()` | `boolean` | Whether a managed binary exists in `installDir`. |
+| `getBinaryStatus()` | `BinaryStatus` | `{ installed, version, path }`. |
+| `installBinary(version?)` | `Promise<string>` | Download cloudflared; returns its path. |
+
+### Quick tunnel
+
+```ts
+startQuick(opts: { port: number; url?: string; autoStopMinutes?: number }, onProgress?: ProgressCallback)
+  : Promise<{ id: string; publicUrl: string; timings: Record<string, number> }>
+stopQuick(port: number): Promise<void>
+```
+
+`autoStopMinutes` defaults to `60`; `0` disables auto-stop. `url` overrides the default `http://localhost:<port>` target.
+
+### Remote tunnel
+
+```ts
+startRemote(opts: { id: string; token: string; label?: string }, onProgress?: ProgressCallback)
+  : Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }>
+stopRemote(id: string): Promise<void>
+getRemoteIngress(id: string): IngressInfo[]
+isRemoteActive(id: string): boolean
+```
+
+### Local tunnel
+
+```ts
+checkAuth(): { authenticated: boolean; certPath: string }
+getCertPath(): string
+login(callbacks: LoginCallbacks): void          // { onUrl, onComplete, onError }
+cancelLogin(): void
+logout(): { success: boolean }
+
+createTunnel(name: string): Promise<{ tunnelId: string; credentialsFile: string }>
+deleteTunnel(tunnelId: string, credentialsFile?: string): Promise<void>
+cleanupTunnelFiles(tunnelId: string): void
+routeDns(tunnelName: string, hostname: string): Promise<{ alreadyExists: boolean }>
+writeLocalConfig(config: { tunnelId; credentialsFile; ingress }): string  // returns config.yml path
+
+startLocal(config: LocalTunnelConfig, onProgress?: ProgressCallback)
+  : Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }>
+stopLocal(id: string): Promise<void>
+isLocalActive(id: string): boolean
+```
+
+`LocalTunnelConfig`: `{ id, name, tunnelId, credentialsFile, ingress: IngressInfo[] }`. `startLocal` throws if `ingress` is empty.
+
+### Account & status
+
+```ts
+listTunnels(): Promise<TunnelListEntry[]>   // every named tunnel on the account
+list(): ActiveTunnel[]                       // tunnels this manager is running
+stopAll(): Promise<void>
+```
+
+### Events
+
+| Event | Payload |
+| --- | --- |
+| `status-changed` | `(tunnels: ActiveTunnel[])` |
+| `ingress-update` | `({ id: string; ingress: IngressInfo[] })` |
+
+---
+
+## TunnelStore
+
+Optional JSON-file persistence (`<dataDir>/config.json`). No dependency on `TunnelKit`.
+
+```ts
+new TunnelStore(options?: { dataDir?: string; logger?: Logger })
+store.path                                  // absolute path to config.json
+```
+
+| Method | Returns | Description |
+| --- | --- | --- |
+| `getRemotes()` | `RemoteTunnelEntry[]` | All remote configs. |
+| `getRemote(id)` | `RemoteTunnelEntry \| null` | One remote config. |
+| `addRemote(label, token)` | `RemoteTunnelEntry` | Persist a new remote config (generates `id`). |
+| `removeRemote(id)` | `boolean` | Remove; `true` if it existed. |
+| `getLocals()` | `LocalTunnelEntry[]` | All local tunnels. |
+| `getLocal(id)` | `LocalTunnelEntry \| null` | One local tunnel. |
+| `addLocal(name, tunnelId, credentialsFile)` | `LocalTunnelEntry` | Persist a new local tunnel (empty ingress). |
+| `removeLocal(id)` | `boolean` | Remove; `true` if it existed. |
+| `addLocalIngress(id, hostname, service)` | `LocalTunnelEntry \| null` | Add/update an ingress rule (matched by hostname). |
+| `removeLocalIngress(id, hostname)` | `LocalTunnelEntry \| null` | Remove an ingress rule. |
+| `getZone()` / `setZone(zone)` / `clearZone()` | `string \| null` / `void` / `void` | Authorized DNS zone. |
+
+`RemoteTunnelEntry`: `{ id, label, token }`. `LocalTunnelEntry`: `{ id, name, tunnelId, credentialsFile, ingress: IngressInfo[] }`.
+
+---
+
+## CloudflaredTunnel
+
+Low-level typed `EventEmitter` around a `cloudflared` process. Most callers should prefer `TunnelKit`.
+
+### Factories
+
+```ts
+CloudflaredTunnel.quick(url?: string, binaryPath?: string): CloudflaredTunnel
+CloudflaredTunnel.withToken(token: string, binaryPath?: string): CloudflaredTunnel
+CloudflaredTunnel.withConfig(configPath: string, binaryPath?: string): CloudflaredTunnel
+```
+
+### Instance
+
+```ts
+tunnel.process            // the underlying ChildProcess
+tunnel.stop(): boolean    // SIGINT the process
+tunnel.addHandler(fn)     // register a custom output parser
+```
+
+### Static commands
+
+```ts
+CloudflaredTunnel.login(callbacks: LoginCallbacks, options?: LoginOptions): LoginHandle
+CloudflaredTunnel.createTunnel(name, options?: CreateTunnelOptions): Promise<CreateTunnelResult>
+CloudflaredTunnel.deleteTunnel(tunnel, options?: DeleteTunnelOptions): Promise<DeleteTunnelResult>
+CloudflaredTunnel.routeDns(tunnel, hostname, options?: RouteDnsOptions): Promise<RouteDnsResult>
+CloudflaredTunnel.listTunnels(options?: ListTunnelsOptions): Promise<TunnelListEntry[]>
+```
+
+Command options accept `origincert` and `binaryPath`; `LoginOptions` also accepts `preventBrowserOpen` (default `true`).
+
+### Events (`CloudflaredTunnelEvents`)
+
+| Event | Payload |
+| --- | --- |
+| `url` | `(url: string)` — TryCloudflare URL or ingress hostname |
+| `connected` | `(info: ConnectionInfo)` |
+| `disconnected` | `(info: ConnectionInfo)` |
+| `config` | `({ config, version })` |
+| `error` | `(error: Error)` |
+| `exit` | `(code, signal)` |
+| `stdout` / `stderr` | `(data: string)` |
+
+### CloudflaredMissingError
+
+Thrown when no `cloudflared` binary can be resolved.
+
+---
+
+## Binary functions
+
+```ts
+defaultInstallDir(): string                       // ~/.tunnelkit/bin
+getBinaryPath(installDir?): string                // path to managed binary
+isBinaryInstalled(installDir?): boolean
+resolveCloudflaredBinary(installDir?): string | null   // managed, else PATH, else null
+getBinaryVersion(binaryPath): string | null
+getBinaryStatus(installDir?): BinaryStatus        // { installed, version, path }
+installBinary(options?: InstallBinaryOptions): Promise<string>
+```
+
+`InstallBinaryOptions`: `{ installDir?, version?, logger? }`. `BinaryStatus`: `{ installed, version, path }`.
+
+---
+
+## Utilities & types
+
+```ts
+which(binary: string): string | null   // cross-runtime PATH lookup
+noopLogger: Required<Logger>
+```
+
+Types: `Logger`, `TunnelType`, `IngressInfo`, `ActiveTunnel`, `ProgressStage`, `ProgressCallback`, `TunnelKitOptions`, `TunnelKitEvents`, `LocalTunnelConfig`, `TunnelStoreOptions`, `RemoteTunnelEntry`, `LocalTunnelEntry`, `CloudflaredTunnelEvents`, `ConnectionInfo`, `LoginHandle`, `LoginCallbacks`, `LoginOptions`, `CreateTunnelOptions`, `CreateTunnelResult`, `DeleteTunnelOptions`, `DeleteTunnelResult`, `RouteDnsOptions`, `RouteDnsResult`, `ListTunnelsOptions`, `TunnelListEntry`, `InstallBinaryOptions`, `BinaryStatus`.
+
+### ActiveTunnel
+
+```ts
+{
+  id: string;            // "quick:<port>" or your supplied id
+  type: 'quick' | 'remote' | 'local';
+  port: number;          // local port for quick; 0 otherwise
+  publicUrl: string;     // TryCloudflare URL or https://<first-hostname>
+  startedAt: string;     // ISO timestamp
+  autoStopMinutes: number;
+  label?: string;
+  ingress?: IngressInfo[];
+}
+```
