@@ -1,13 +1,13 @@
 /**
- * tunnelkit — a zero-dependency, TypeScript-native toolkit for running
- * Cloudflare Tunnels (Quick, Remote, and Local) from Node or Bun.
+ * tunnelkit — run Cloudflare Tunnels (Quick, Remote, and Local) from Node or
+ * Bun. A typed API and CLI over the `cloudflared` binary, with zero dependencies.
  */
 
 // High-level orchestration — start here.
 export { TunnelKit } from './manager.js';
 export type { TunnelKitOptions, TunnelKitEvents, LocalTunnelConfig } from './manager.js';
 
-// Optional JSON-file persistence for tunnel configuration.
+// JSON-file persistence for tunnel configuration (used by the CLI by default).
 export { TunnelStore } from './store.js';
 export type { TunnelStoreOptions, RemoteTunnelEntry, LocalTunnelEntry } from './store.js';
 

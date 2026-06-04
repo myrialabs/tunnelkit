@@ -1,9 +1,10 @@
 /**
- * Local (named) tunnel — the full lifecycle, persisted with TunnelStore.
+ * Local (named) tunnel — the full lifecycle, auto-persisted.
  *
  * This mirrors what a real app does: authenticate once, create a named tunnel,
- * persist it, route a hostname to it, then run it. Re-running reuses the saved
- * tunnel instead of creating a new one.
+ * route a hostname to it, then run it. TunnelKit saves the tunnel automatically
+ * (to `tk.store`), so re-running reuses the saved tunnel instead of creating a
+ * new one.
  *
  * Prerequisites: a Cloudflare account with a zone (domain) you control, and the
  * hostname you pass must belong to that zone.
@@ -11,7 +12,7 @@
  * Run with:  bun run examples/local.ts app.example.com http://localhost:3000
  */
 
-import { TunnelKit, TunnelStore } from '../src/index.js';
+import { TunnelKit, type LocalTunnelConfig } from '../src/index.js';
 
 const hostname = process.argv[2];
 const service = process.argv[3] ?? 'http://localhost:3000';
@@ -20,8 +21,7 @@ if (!hostname) {
 	process.exit(1);
 }
 
-const tk = new TunnelKit({ logger: console });
-const store = new TunnelStore();
+const tk = new TunnelKit({ logger: console }); // persistence on by default → tk.store
 
 if (!tk.isBinaryInstalled()) {
 	await tk.installBinary();
@@ -41,26 +41,18 @@ if (!tk.checkAuth().authenticated) {
 	console.log('Authenticated.');
 }
 
-// 2. Reuse a saved tunnel for this hostname, or create + persist a new one.
-let entry = store.getLocals().find((l) => l.ingress.some((r) => r.hostname === hostname));
-if (!entry) {
+// 2. Reuse a saved tunnel for this hostname, or create a new one.
+let config = tk.store?.getLocals().find((l) => l.ingress.some((r) => r.hostname === hostname)) as LocalTunnelConfig | undefined;
+if (!config) {
 	const name = `tunnelkit-${hostname.replace(/[^a-z0-9]/gi, '-')}`;
 	const created = await tk.createTunnel(name);
-	entry = store.addLocal(name, created.tunnelId, created.credentialsFile);
-	store.addLocalIngress(entry.id, hostname, service);
-	await tk.routeDns(created.tunnelId, hostname);
-	entry = store.getLocal(entry.id)!;
+	await tk.routeDns(name, hostname);
+	config = { id: name, name, tunnelId: created.tunnelId, credentialsFile: created.credentialsFile, ingress: [{ hostname, service }] };
 	console.log(`Created tunnel ${name} (${created.tunnelId}) and routed ${hostname}.`);
 }
 
-// 3. Run it.
-await tk.startLocal({
-	id: entry.id,
-	name: entry.name,
-	tunnelId: entry.tunnelId,
-	credentialsFile: entry.credentialsFile,
-	ingress: entry.ingress
-});
+// 3. Run it. TunnelKit persists it to tk.store automatically.
+await tk.startLocal(config);
 console.log(`\n  → https://${hostname}  (serving ${service})\n`);
 
 process.on('SIGINT', async () => {

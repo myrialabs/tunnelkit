@@ -1,22 +1,22 @@
 /**
  * Case: restore tunnels after a restart.
  *
- * A long-running app persists its tunnels with TunnelStore, then re-launches
- * them on boot. This is the "reconnect everything" routine you'd call at
- * startup. (Quick tunnels are ephemeral by nature and are not persisted.)
+ * TunnelKit auto-saves the remote/local tunnels you start, so restoring is just
+ * reading them back from `tk.store` and starting each again — the "reconnect
+ * everything" routine you'd call at boot. (Quick tunnels are ephemeral and not
+ * persisted.)
  *
  * Run with:  bun run examples/restore-on-startup.ts
  */
 
-import { TunnelKit, TunnelStore } from '../src/index.js';
+import { TunnelKit } from '../src/index.js';
 
-const tk = new TunnelKit({ logger: console });
-const store = new TunnelStore();
+const tk = new TunnelKit({ logger: console }); // persistence on by default → tk.store
 
 if (!tk.isBinaryInstalled()) await tk.installBinary();
 
-const remotes = store.getRemotes();
-const locals = store.getLocals().filter((l) => l.ingress.length > 0);
+const remotes = tk.store?.getRemotes() ?? [];
+const locals = (tk.store?.getLocals() ?? []).filter((l) => l.ingress.length > 0);
 
 if (remotes.length === 0 && locals.length === 0) {
 	console.log('Nothing persisted yet. Run examples/local.ts to create one.');

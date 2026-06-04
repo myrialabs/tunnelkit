@@ -10,10 +10,11 @@
  *                 run from a generated config file).
  *
  * The manager owns process lifecycle, start timeouts, quick-tunnel auto-stop,
- * and an in-memory registry of active tunnels. It does **not** persist anything
- * about *which* tunnels you have configured — tokens, credentials, and ingress
- * rules are passed in by the caller. Wire persistence in your own app (see
- * {@link TunnelStore}).
+ * and an in-memory registry of active tunnels. By default it also **persists**
+ * the remote and local tunnels you start (to `<dataDir>/config.json`), so you
+ * can restore them later through `tk.store`. Set `dataDir` to change where that
+ * lives, or pass `store: false` to disable it. Quick tunnels are ephemeral and
+ * never saved.
  *
  * Emits:
  * - 'status-changed' (tunnels: ActiveTunnel[])      whenever a tunnel starts/stops
@@ -40,6 +41,7 @@ import {
 	type BinaryStatus
 } from './binary.js';
 import { resolveLogger, type Logger } from './logger.js';
+import { TunnelStore } from './store.js';
 import type { ActiveTunnel, IngressInfo, ProgressCallback, TunnelType } from './types.js';
 
 export interface TunnelKitOptions {
@@ -59,6 +61,16 @@ export interface TunnelKitOptions {
 	 * an orphan and delete it. Default: always `false`.
 	 */
 	isTunnelKnown?: (tunnelId: string) => boolean;
+	/**
+	 * Whether to persist the remote/local tunnels you start, so they can be
+	 * restored later (read them back via `tk.store`). Saved under `dataDir` — to
+	 * change where, set `dataDir`.
+	 *
+	 * - **omitted / `true`** (default): auto-save to `<dataDir>/config.json`.
+	 * - **`false`**: disable persistence entirely (stateless).
+	 * - **a `TunnelStore`** (advanced): use your own instance instead.
+	 */
+	store?: boolean | TunnelStore;
 }
 
 export interface LocalTunnelConfig {
@@ -143,6 +155,7 @@ export class TunnelKit extends EventEmitter {
 	private readonly quickTimeoutMs: number;
 	private readonly connectTimeoutMs: number;
 	private readonly isTunnelKnown: (tunnelId: string) => boolean;
+	private readonly _store: TunnelStore | null;
 
 	private readonly certPath: string;
 	private readonly defaultCloudflaredCert = join(homedir(), '.cloudflared', 'cert.pem');
@@ -160,7 +173,21 @@ export class TunnelKit extends EventEmitter {
 		this.quickTimeoutMs = options.quickTimeoutMs ?? 30000;
 		this.connectTimeoutMs = options.connectTimeoutMs ?? 60000;
 		this.isTunnelKnown = options.isTunnelKnown ?? (() => false);
+		this._store = options.store === false
+			? null
+			: options.store instanceof TunnelStore
+				? options.store
+				: new TunnelStore({ dataDir: this.dataDir, logger: options.logger });
 		this.certPath = join(this.dataDir, 'cert.pem');
+	}
+
+	/**
+	 * The persistence store backing auto-save, or `null` when persistence is
+	 * disabled (`store: false`). Read saved tunnels from it (e.g. to restore on
+	 * startup): `tk.store?.getRemotes()`, `tk.store?.getLocals()`.
+	 */
+	get store(): TunnelStore | null {
+		return this._store;
 	}
 
 	// --- Binary ---
@@ -376,6 +403,7 @@ export class TunnelKit extends EventEmitter {
 
 		timings.tunnelStart = Date.now() - startTime;
 		this.remoteTunnels.set(opts.id, instance);
+		this._store?.upsertRemote(opts.id, label, opts.token);
 
 		this.log.log(`Remote tunnel started: ${label}`);
 		onProgress?.('connected', { timings });
@@ -647,6 +675,13 @@ export class TunnelKit extends EventEmitter {
 			id: config.id,
 			name: config.name,
 			startedAt: new Date(),
+			ingress: config.ingress.map((r) => ({ hostname: r.hostname, service: r.service }))
+		});
+		this._store?.upsertLocal({
+			id: config.id,
+			name: config.name,
+			tunnelId: config.tunnelId,
+			credentialsFile: config.credentialsFile,
 			ingress: config.ingress.map((r) => ({ hostname: r.hostname, service: r.service }))
 		});
 

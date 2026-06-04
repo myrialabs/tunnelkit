@@ -1,5 +1,36 @@
-import { describe, it, expect } from 'bun:test';
-import { resolveQuickService } from './manager.js';
+import { describe, it, expect, afterAll } from 'bun:test';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { TunnelKit, resolveQuickService } from './manager.js';
+import { TunnelStore } from './store.js';
+
+const dir = mkdtempSync(join(tmpdir(), 'tunnelkit-mgr-'));
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+describe('TunnelKit store option', () => {
+	it('exposes a default TunnelStore at dataDir', () => {
+		const tk = new TunnelKit({ dataDir: dir });
+		expect(tk.store).toBeInstanceOf(TunnelStore);
+		expect(tk.store?.path).toBe(join(dir, 'config.json'));
+	});
+
+	it('keeps the default store with store: true', () => {
+		const tk = new TunnelKit({ dataDir: dir, store: true });
+		expect(tk.store).toBeInstanceOf(TunnelStore);
+	});
+
+	it('disables persistence with store: false', () => {
+		const tk = new TunnelKit({ dataDir: dir, store: false });
+		expect(tk.store).toBeNull();
+	});
+
+	it('uses a caller-supplied store instance (advanced)', () => {
+		const custom = new TunnelStore({ dataDir: dir });
+		const tk = new TunnelKit({ dataDir: '/somewhere/else', store: custom });
+		expect(tk.store).toBe(custom);
+	});
+});
 
 describe('resolveQuickService', () => {
 	it('expands a bare numeric port to a localhost URL', () => {

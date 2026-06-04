@@ -1,14 +1,15 @@
 /**
- * TunnelStore — optional JSON-file persistence for tunnel configuration.
+ * TunnelStore — JSON-file persistence for tunnel configuration.
  *
- * `TunnelKit` is deliberately stateless about *which* tunnels you have
- * configured. `TunnelStore` is the batteries-included companion that persists
- * that configuration — remote tokens, local tunnel records (id, name, tunnelId,
- * credentials, ingress rules), and an authorized DNS zone — to a single JSON
- * file (`<dataDir>/config.json`).
+ * This is the persistence layer the `tunnelkit` CLI uses by default, so saved
+ * tunnels can be reused by name. It persists remote tokens, local tunnel records
+ * (id, name, tunnelId, credentials, ingress rules), and an authorized DNS zone
+ * to a single JSON file (`<dataDir>/config.json`, written `0600`).
  *
- * It is entirely optional and has no dependency on `TunnelKit`; compose the
- * two yourself, or bring your own storage (a database, env vars, etc.).
+ * `TunnelKit` itself stays stateless about *which* tunnels you have configured,
+ * and `TunnelStore` has no dependency on it — so when embedding the library you
+ * can compose the two yourself, or bring your own storage (a database, env vars,
+ * etc.).
  */
 
 import { join } from 'path';
@@ -108,6 +109,18 @@ export class TunnelStore {
 		return entry;
 	}
 
+	/** Insert or update a remote entry keyed by a caller-supplied `id` (used by auto-save). */
+	upsertRemote(id: string, label: string, token: string): RemoteTunnelEntry {
+		const data = this.read();
+		const existing = data.remotes.find((r) => r.id === id);
+		const entry: RemoteTunnelEntry = { id, label, token };
+		if (existing) Object.assign(existing, entry);
+		else data.remotes.push(entry);
+		this.write(data);
+		this.log.log(`Remote tunnel config saved: ${label}`);
+		return existing ?? entry;
+	}
+
 	removeRemote(id: string): boolean {
 		const data = this.read();
 		const before = data.remotes.length;
@@ -134,6 +147,17 @@ export class TunnelStore {
 		data.locals.push(entry);
 		this.write(data);
 		this.log.log(`Local tunnel config added: ${name} (${tunnelId})`);
+		return entry;
+	}
+
+	/** Insert or replace a local entry keyed by `entry.id` (used by auto-save). */
+	upsertLocal(entry: LocalTunnelEntry): LocalTunnelEntry {
+		const data = this.read();
+		const index = data.locals.findIndex((l) => l.id === entry.id);
+		if (index >= 0) data.locals[index] = entry;
+		else data.locals.push(entry);
+		this.write(data);
+		this.log.log(`Local tunnel config saved: ${entry.name} (${entry.tunnelId})`);
 		return entry;
 	}
 

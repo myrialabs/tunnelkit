@@ -26,7 +26,7 @@ tunnelkit quick 3000    # → https://random-words.trycloudflare.com
 - **All three tunnel modes**, first-class: Quick, Remote (token), and Local (named).
 - **Fully typed**, including events. `TunnelKit` and `CloudflaredTunnel` are typed `EventEmitter`s.
 - **Manages the binary** — download `cloudflared` on demand, or reuse one already on `PATH`.
-- **Stateless core**, optional persistence (`TunnelStore`) when you want it. The CLI persists by default so you can reuse named tunnels.
+- **Persistence on by default** — the API *and* CLI save the remote/local tunnels you start, so you can restore them by name; point it anywhere with a custom `TunnelStore`, or pass `store: false` to opt out.
 - **Ships a CLI** — the same capabilities from your terminal via `tunnelkit <command>`.
 - **Zero npm dependencies** — pure Node built-ins. Runs identically on **Node 18+** and **Bun**.
 
@@ -41,7 +41,7 @@ tunnelkit quick 3000    # → https://random-words.trycloudflare.com
 | Auto-stop (quick) | `startQuick({ autoStopMinutes })` |
 | Live status / ingress | `'status-changed'` / `'ingress-update'` events, `list()` |
 | Binary install / status | `installBinary` / `isBinaryInstalled` / `getBinaryStatus` |
-| Config persistence | `TunnelStore` (optional) |
+| Config persistence | `TunnelStore` (on by default, API & CLI) |
 | Low-level process control | `CloudflaredTunnel` |
 | Terminal usage | `tunnelkit` CLI ([docs](./docs/cli.md)) |
 
@@ -96,18 +96,23 @@ await new Promise<void>((resolve, reject) => {
   tk.login({ onUrl: (url) => console.log('Authorize:', url), onComplete: resolve, onError: reject });
 });
 
-// 2. Create + route.
-const { tunnelId, credentialsFile } = await tk.createTunnel('my-tunnel');
-await tk.routeDns(tunnelId, 'app.example.com');
+// 2. Create the Cloudflare tunnel (named "acme-prod") and route a hostname to it.
+const { tunnelId, credentialsFile } = await tk.createTunnel('acme-prod');
+await tk.routeDns('acme-prod', 'app.example.com');
 
-// 3. Run.
+// 3. Run it. The two identifiers are different things:
+//    - `name` is the Cloudflare tunnel name (the one you created above).
+//    - `id`   is *your* handle for this tunnel in TunnelKit's registry — you pass
+//             it to stopLocal()/isLocalActive(), so make it whatever your app keys on.
 await tk.startLocal({
-  id: 'my-tunnel',
-  name: 'my-tunnel',
+  id: 'storefront',          // your app's identifier
+  name: 'acme-prod',         // the Cloudflare tunnel name
   tunnelId,
   credentialsFile,
   ingress: [{ hostname: 'app.example.com', service: 'http://localhost:3000' }]
 });
+
+// later: await tk.stopLocal('storefront');
 ```
 
 `createTunnel` includes orphan recovery: if a same-named tunnel exists on Cloudflare but isn't known locally and has no active connections, it's deleted and the create retried. Guard tunnels you track with the `isTunnelKnown` option.
@@ -134,29 +139,43 @@ Run commands like `quick`, `remote`, and `local` stay in the foreground and shut
 
 ## Events
 
-Both `TunnelKit` and `CloudflaredTunnel` are typed `EventEmitter`s.
+A `TunnelKit` instance (`tk` in these examples) is a typed `EventEmitter` with two high-level events:
 
 ```ts
-tk.on('status-changed', (tunnels) => console.log('Active:', tunnels));
-tk.on('ingress-update', ({ id, ingress }) => console.log(id, ingress));
+tk.on('status-changed', (tunnels) => console.log('Active:', tunnels)); // any tunnel starts or stops
+tk.on('ingress-update', ({ id, ingress }) => console.log(id, ingress)); // a remote tunnel's ingress syncs
 ```
 
-`CloudflaredTunnel` emits `url`, `connected`, `disconnected`, `config`, `error`, `exit`, `stdout`, `stderr`.
+Separately, the low-level [`CloudflaredTunnel`](#low-level-api) — which wraps a single `cloudflared` child process — is its own typed `EventEmitter`, emitting `url`, `connected`, `disconnected`, `config`, `error`, `exit`, `stdout`, and `stderr`. Reach for it only when you want to drive a process directly; `TunnelKit` is the usual entry point.
 
-## Persistence (optional)
+## Persistence
 
-`TunnelKit` is stateless about *which* tunnels you've configured. `TunnelStore` is the batteries-included companion that persists remote tokens, local tunnel records, ingress rules, and an authorized zone to `<dataDir>/config.json`:
+**`TunnelKit` saves the remote and local tunnels you start by default** — through both the API and the CLI — so you can restore them later. (Quick tunnels are ephemeral and never saved.) It's backed by `TunnelStore`: a small JSON store (`<dataDir>/config.json`, written `0600` since it can hold tokens) for remote tokens, local tunnel records, ingress rules, and an authorized zone.
+
+It's a plain on/off switch — location follows `dataDir`:
+
+```ts
+new TunnelKit();                                  // auto-save under dataDir (default)
+new TunnelKit({ dataDir: '~/.myapp/tunnels' });   // save somewhere else — just set dataDir
+new TunnelKit({ store: false });                  // disable persistence entirely
+```
+
+Read saved tunnels back from `tk.store` — e.g. to restore everything on startup:
+
+```ts
+const tk = new TunnelKit();
+for (const r of tk.store?.getRemotes() ?? []) await tk.startRemote(r);
+```
+
+For advanced cases (sharing one store across components, a custom logger) you can pass your own `TunnelStore` instance as `store`; and since `TunnelStore` has no dependency on `TunnelKit`, you can also use it standalone:
 
 ```ts
 import { TunnelStore } from 'tunnelkit';
 
-const store = new TunnelStore();
-const remote = store.addRemote('prod', token);
+const store = new TunnelStore({ dataDir: '~/.myapp/tunnels' });
 store.getRemotes();             // [{ id, label, token }]
 store.addLocalIngress(id, 'app.example.com', 'http://localhost:3000');
 ```
-
-Bring your own storage instead (a DB, env vars, …) — the two are fully decoupled. The `tunnelkit` CLI wires `TunnelStore` up for you by default (so `tunnelkit remote prod` and `tunnelkit local my-app` can reuse saved config); pass `--no-save` to skip it.
 
 ## Binary management
 
@@ -174,8 +193,14 @@ If no binary can be resolved, operations throw `CloudflaredMissingError`.
 
 ```ts
 new TunnelKit({
-  dataDir,          // cert + credentials + generated configs (default: ~/.tunnelkit)
-  installDir,       // managed cloudflared binary (default: ~/.tunnelkit/bin)
+  // Location — just two directories:
+  dataDir,          // ALL persisted state: cert.pem, credentials, generated configs, saved tunnels (default: ~/.tunnelkit)
+  installDir,       // ONLY the cloudflared binary — its own dir so a shared binary can live outside your data (default: ~/.tunnelkit/bin)
+
+  // Persistence on/off (saved inside dataDir):
+  store,            // true / omit = auto-save; false = disable; (advanced) a TunnelStore instance
+
+  // Behaviour:
   logger,           // any { log, warn, error } — silent if omitted (try `console`)
   quickTimeoutMs,   // quick-tunnel URL timeout (default: 30000)
   connectTimeoutMs, // remote/local connection timeout (default: 60000)
@@ -183,7 +208,7 @@ new TunnelKit({
 });
 ```
 
-`dataDir` holds `cert.pem` (from `login()`, migrated from `~/.cloudflared` if found) and per-tunnel `<tunnelId>/credentials.json` + `config.yml`.
+There's just one place to set a location: **`dataDir`**. It holds everything tunnelkit persists — `cert.pem` (from `login()`, migrated from `~/.cloudflared` if found), per-tunnel `<tunnelId>/credentials.json` + `config.yml`, and the saved-tunnels store (`config.json`). To put it all somewhere else (as a host app might — e.g. `~/.myapp/tunnels`), set `dataDir` to that path; you don't construct anything. `installDir` is separate only so a shared `cloudflared` binary can live outside your app's data; `store` is a plain on/off switch.
 
 ## How is this different from `cloudflared`?
 
@@ -200,7 +225,7 @@ tunnelkit doesn't replace the `cloudflared` binary — it *drives* it, replacing
 | High-level manager (lifecycle, timeouts, auto-stop, registry) | ❌ | ✅ `TunnelKit` |
 | login / create / delete / route-dns / list helpers | ❌ | ✅ |
 | `config.yml` generation + orphan recovery | ❌ | ✅ |
-| Optional persistence | ❌ | ✅ `TunnelStore` |
+| Built-in persistence | ❌ | ✅ `TunnelStore` (default-on) |
 | Typed events end-to-end | partial | ✅ |
 | Dependencies | has runtime deps | **zero** |
 | Runtime | Node | Node 18+ **and** Bun |

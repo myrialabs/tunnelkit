@@ -25,12 +25,13 @@ new TunnelKit(options?: TunnelKitOptions)
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `dataDir` | `string` | `~/.tunnelkit` | Holds `cert.pem`, credentials, generated configs. |
-| `installDir` | `string` | `~/.tunnelkit/bin` | Managed cloudflared binary location. |
+| `dataDir` | `string` | `~/.tunnelkit` | All persisted state: `cert.pem`, credentials, generated configs, and the saved-tunnels store (`config.json`). Set this to relocate everything. |
+| `installDir` | `string` | `~/.tunnelkit/bin` | Only the managed cloudflared binary — separate so a shared binary can live outside your data. |
 | `logger` | `Logger` | silent | `{ log?, warn?, error? }`; pass `console` for output. |
 | `quickTimeoutMs` | `number` | `30000` | Timeout waiting for a quick-tunnel URL. |
 | `connectTimeoutMs` | `number` | `60000` | Timeout waiting for remote/local connection. |
 | `isTunnelKnown` | `(tunnelId: string) => boolean` | `() => false` | Protects tunnels you track from orphan cleanup. |
+| `store` | `boolean \| TunnelStore` | `true` | Persist started tunnels (saved under `dataDir`). `true`/omit = auto-save; `false` = off; a `TunnelStore` = advanced (bring your own instance). Change the location via `dataDir`, not here. |
 
 ### Binary methods
 
@@ -81,7 +82,21 @@ stopLocal(id: string): Promise<void>
 isLocalActive(id: string): boolean
 ```
 
-`LocalTunnelConfig`: `{ id, name, tunnelId, credentialsFile, ingress: IngressInfo[] }`. `startLocal` throws if `ingress` is empty.
+`LocalTunnelConfig`: `{ id, name, tunnelId, credentialsFile, ingress: IngressInfo[] }`, where:
+
+- `id` — *your* handle for this tunnel in TunnelKit's registry (what you pass to `stopLocal`/`isLocalActive`). Choose whatever your app keys on.
+- `name` — the Cloudflare tunnel name (the one you passed to `createTunnel`).
+- `tunnelId` / `credentialsFile` — returned by `createTunnel`.
+
+`id` and `name` are independent: they may match, but they don't have to. `startLocal` throws if `ingress` is empty.
+
+### Persistence
+
+```ts
+tk.store               // TunnelStore | null — the backing store (null when `store: false`)
+```
+
+Remote and local tunnels are saved to `tk.store` automatically when they start (quick tunnels are not). Read them back to restore on startup, e.g. `for (const r of tk.store?.getRemotes() ?? []) await tk.startRemote(r)`. See [`TunnelStore`](#tunnelstore).
 
 ### Account & status
 
@@ -102,7 +117,7 @@ stopAll(): Promise<void>
 
 ## TunnelStore
 
-Optional JSON-file persistence (`<dataDir>/config.json`, written with `0600` permissions since it can hold tokens). No dependency on `TunnelKit`.
+JSON-file persistence (`<dataDir>/config.json`, written with `0600` permissions since it can hold tokens). This is the store `TunnelKit` auto-saves to by default (via the `store` option); it has no dependency on `TunnelKit`, so you can also use it standalone or point it at a custom location.
 
 ```ts
 new TunnelStore(options?: { dataDir?: string; logger?: Logger })
@@ -114,10 +129,12 @@ store.path                                  // absolute path to config.json
 | `getRemotes()` | `RemoteTunnelEntry[]` | All remote configs. |
 | `getRemote(id)` | `RemoteTunnelEntry \| null` | One remote config. |
 | `addRemote(label, token)` | `RemoteTunnelEntry` | Persist a new remote config (generates `id`). |
+| `upsertRemote(id, label, token)` | `RemoteTunnelEntry` | Insert or update a remote keyed by `id` (used by auto-save). |
 | `removeRemote(id)` | `boolean` | Remove; `true` if it existed. |
 | `getLocals()` | `LocalTunnelEntry[]` | All local tunnels. |
 | `getLocal(id)` | `LocalTunnelEntry \| null` | One local tunnel. |
 | `addLocal(name, tunnelId, credentialsFile)` | `LocalTunnelEntry` | Persist a new local tunnel (empty ingress). |
+| `upsertLocal(entry)` | `LocalTunnelEntry` | Insert or replace a local entry keyed by `entry.id` (used by auto-save). |
 | `removeLocal(id)` | `boolean` | Remove; `true` if it existed. |
 | `addLocalIngress(id, hostname, service)` | `LocalTunnelEntry \| null` | Add/update an ingress rule (matched by hostname). |
 | `removeLocalIngress(id, hostname)` | `LocalTunnelEntry \| null` | Remove an ingress rule. |

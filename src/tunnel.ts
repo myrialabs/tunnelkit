@@ -1,10 +1,9 @@
 /**
  * CloudflaredTunnel
  *
- * Low-level EventEmitter wrapper around a `cloudflared` child process. This is
- * a zero-dependency, TypeScript-native replacement for the `Tunnel` class from
- * the `cloudflared` npm package, extended with login / create / delete /
- * route-dns / list commands.
+ * Low-level EventEmitter wrapper around a `cloudflared` child process — a typed,
+ * dependency-free replacement for the `Tunnel` class from the `cloudflared` npm
+ * package, extended with login / create / delete / route-dns / list commands.
  *
  * Events:
  * - 'url'          (url: string)                            TryCloudflare URL (or ingress hostname)

@@ -37,6 +37,29 @@ test('local ingress add updates and removes by hostname', () => {
 	store.removeLocal(local.id);
 });
 
+test('upsertRemote inserts then updates the same id (no duplicates)', () => {
+	const store = new TunnelStore({ dataDir: dir });
+	store.upsertRemote('prod', 'prod', 'tok-1');
+	store.upsertRemote('prod', 'prod', 'tok-2'); // same id → update in place
+
+	const remotes = store.getRemotes().filter((r) => r.id === 'prod');
+	expect(remotes).toHaveLength(1);
+	expect(remotes[0].token).toBe('tok-2');
+	store.removeRemote('prod');
+});
+
+test('upsertLocal replaces the entry (incl. ingress) for a stable id', () => {
+	const store = new TunnelStore({ dataDir: dir });
+	store.upsertLocal({ id: 'app', name: 'app', tunnelId: 'uuid-1', credentialsFile: '/c1.json', ingress: [{ hostname: 'a.example.com', service: 'http://localhost:3000' }] });
+	store.upsertLocal({ id: 'app', name: 'app', tunnelId: 'uuid-2', credentialsFile: '/c2.json', ingress: [{ hostname: 'b.example.com', service: 'http://localhost:4000' }] });
+
+	const locals = store.getLocals().filter((l) => l.id === 'app');
+	expect(locals).toHaveLength(1);
+	expect(locals[0].tunnelId).toBe('uuid-2');
+	expect(locals[0].ingress).toEqual([{ hostname: 'b.example.com', service: 'http://localhost:4000' }]);
+	store.removeLocal('app');
+});
+
 test('authorized zone get/set/clear', () => {
 	const store = new TunnelStore({ dataDir: dir });
 	expect(store.getZone()).toBeNull();

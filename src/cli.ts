@@ -98,13 +98,16 @@ function makeKit(parsed: ParsedArgs): TunnelKit {
 	return new TunnelKit({
 		logger: parsed.flags.has('verbose') ? verboseLogger : undefined,
 		dataDir: firstValue(parsed, 'data-dir'),
-		installDir: firstValue(parsed, 'install-dir')
+		installDir: firstValue(parsed, 'install-dir'),
+		// TunnelKit auto-saves remote/local tunnels by default; `--no-save` disables it.
+		store: !parsed.flags.has('no-save')
 	});
 }
 
 /**
- * The CLI persists tunnel config by default so labels can be reused
- * (`tunnelkit remote prod`). `--no-save` opts out of both reading and writing.
+ * A standalone store for the config-management commands (`saved`, `forget`).
+ * Returns `null` under `--no-save`. Run commands read/write through `tk.store`
+ * instead, since `TunnelKit` owns persistence.
  */
 function makeStore(parsed: ParsedArgs): TunnelStore | null {
 	if (parsed.flags.has('no-save')) return null;
@@ -195,7 +198,8 @@ async function cmdQuick(parsed: ParsedArgs): Promise<void> {
 
 async function cmdRemote(parsed: ParsedArgs): Promise<void> {
 	const name = parsed.positionals[0];
-	const store = makeStore(parsed);
+	const tk = makeKit(parsed);
+	const store = tk.store; // null under --no-save
 
 	// Token precedence: --token / CF_TUNNEL_TOKEN, else a saved entry by name.
 	const explicitToken = firstValue(parsed, 'token') ?? process.env.CF_TUNNEL_TOKEN;
@@ -211,23 +215,11 @@ async function cmdRemote(parsed: ParsedArgs): Promise<void> {
 		);
 	}
 
+	const explicitName = firstValue(parsed, 'label') ?? name;
 	const label = firstValue(parsed, 'label') ?? saved?.label ?? name;
-	const id = firstValue(parsed, 'id') ?? saved?.id ?? name ?? 'cli-remote';
+	// Key the saved entry by a stable, meaningful id so distinct labels don't collide.
+	const id = firstValue(parsed, 'id') ?? saved?.id ?? explicitName ?? 'cli-remote';
 
-	// Persist a freshly-provided token under a meaningful name, so it can be reused.
-	const persistKey = firstValue(parsed, 'label') ?? name;
-	if (store && explicitToken && persistKey) {
-		const existing = store.getRemotes().find((r) => r.label === persistKey);
-		if (!existing) {
-			store.addRemote(persistKey, explicitToken);
-			out(c.dim(`  saved as "${persistKey}" — reuse with \`tunnelkit remote ${persistKey}\``));
-		} else if (existing.token !== explicitToken) {
-			store.removeRemote(existing.id);
-			store.addRemote(persistKey, explicitToken);
-		}
-	}
-
-	const tk = makeKit(parsed);
 	tk.on('ingress-update', ({ ingress }) => {
 		for (const rule of ingress) {
 			if (rule.hostname) out(c.dim(`    ${rule.hostname} → ${rule.service}`));
@@ -236,9 +228,13 @@ async function cmdRemote(parsed: ParsedArgs): Promise<void> {
 	await ensureBinary(tk);
 
 	const spin = spinner('Starting remote tunnel…');
-	const { ingress } = await tk.startRemote({ id, token, label });
+	const { ingress } = await tk.startRemote({ id, token, label }); // TunnelKit persists it
 	spin.stop();
 
+	// A freshly-supplied token under a usable name can be reused next time.
+	if (store && explicitToken && explicitName) {
+		out(c.dim(`  saved as "${explicitName}" — reuse with \`tunnelkit remote ${explicitName}\``));
+	}
 	out(`\n  ${c.green('●')} ${c.bold(label ?? id)} ${c.dim('connected')}`);
 	for (const rule of ingress) {
 		if (rule.hostname) out(c.dim(`    ${rule.hostname} → ${rule.service}`));
@@ -251,10 +247,10 @@ async function cmdLocal(parsed: ParsedArgs): Promise<void> {
 	const name = parsed.positionals[0];
 	if (!name) throw new Error('local requires a tunnel name, e.g. `tunnelkit local my-app --route app.example.com=http://localhost:3000`');
 
-	const store = makeStore(parsed);
 	const routes = gatherRoutes(parsed);
 
 	const tk = makeKit(parsed);
+	const store = tk.store; // null under --no-save
 	await ensureBinary(tk);
 
 	if (!tk.checkAuth().authenticated) {
@@ -288,19 +284,8 @@ async function cmdLocal(parsed: ParsedArgs): Promise<void> {
 	}
 
 	const startSpin = spinner('Starting local tunnel…');
-	await tk.startLocal({ id: name, name, tunnelId, credentialsFile, ingress: routes });
+	await tk.startLocal({ id: name, name, tunnelId, credentialsFile, ingress: routes }); // TunnelKit persists it
 	startSpin.stop();
-
-	// Persist the tunnel + its routes so `tunnelkit local <name>` can re-run it.
-	if (store) {
-		let entry = store.getLocals().find((l) => l.name === name);
-		if (entry && (entry.tunnelId !== tunnelId || entry.credentialsFile !== credentialsFile)) {
-			store.removeLocal(entry.id);
-			entry = undefined;
-		}
-		entry ??= store.addLocal(name, tunnelId, credentialsFile);
-		for (const route of routes) store.addLocalIngress(entry.id, route.hostname, route.service);
-	}
 
 	out(`\n  ${c.green('●')} ${c.bold(name)} ${c.dim('connected')}`);
 	for (const route of routes) out(c.dim(`    https://${route.hostname} → ${route.service}`));
@@ -380,7 +365,7 @@ async function cmdDelete(parsed: ParsedArgs): Promise<void> {
 	spin.stop(c.green(`✓ Deleted ${target}.`));
 
 	// Keep the saved store consistent: drop any local entry for this tunnel.
-	const store = makeStore(parsed);
+	const store = tk.store;
 	const saved = store?.getLocals().find((l) => l.name === target || l.id === target);
 	if (store && saved) store.removeLocal(saved.id);
 }
