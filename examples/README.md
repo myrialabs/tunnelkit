@@ -29,4 +29,4 @@ Most examples download `cloudflared` on first run if it isn't already installed.
 
 - **Quick** tunnels need no Cloudflare account.
 - **Remote** tunnels need a token from the Cloudflare Zero Trust dashboard (`CF_TUNNEL_TOKEN`).
-- **Local** tunnels need a Cloudflare account with a zone you control; you authenticate once via `login()`, and hostnames must belong to your zone.
+- **Local** tunnels need a Cloudflare account with a zone you control; you authenticate once via `tk.local.login()`, and hostnames must belong to your zone. Account operations (`tk.local.list()`, `tk.local.delete()`) live under `local` too.

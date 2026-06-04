@@ -29,10 +29,10 @@ if (!tk.isBinaryInstalled()) {
 
 // 1. Authenticate (once). The auth URL must be opened in a browser; cloudflared
 //    writes an origin cert when approved.
-if (!tk.checkAuth().authenticated) {
+if (!tk.local.checkAuth().authenticated) {
 	console.log('Not authenticated — starting login...');
 	await new Promise<void>((resolve, reject) => {
-		tk.login({
+		tk.local.login({
 			onUrl: (url) => console.log('\n  Open this URL to authorize:\n  ' + url + '\n'),
 			onComplete: resolve,
 			onError: reject
@@ -45,14 +45,14 @@ if (!tk.checkAuth().authenticated) {
 let config = tk.store?.getLocals().find((l) => l.ingress.some((r) => r.hostname === hostname)) as LocalTunnelConfig | undefined;
 if (!config) {
 	const name = `tunnelkit-${hostname.replace(/[^a-z0-9]/gi, '-')}`;
-	const created = await tk.createTunnel(name);
-	await tk.routeDns(name, hostname);
+	const created = await tk.local.create(name);
+	await tk.local.routeDns(name, hostname);
 	config = { id: name, name, tunnelId: created.tunnelId, credentialsFile: created.credentialsFile, ingress: [{ hostname, service }] };
 	console.log(`Created tunnel ${name} (${created.tunnelId}) and routed ${hostname}.`);
 }
 
 // 3. Run it. TunnelKit persists it to tk.store automatically.
-await tk.startLocal(config);
+await tk.local.start(config);
 console.log(`\n  → https://${hostname}  (serving ${service})\n`);
 
 process.on('SIGINT', async () => {

@@ -1,0 +1,83 @@
+/**
+ * Shared plumbing for the per-mode controllers.
+ *
+ * Each mode ({@link QuickTunnels}, {@link RemoteTunnels}, {@link LocalTunnels})
+ * is a thin facade that owns its own registry but leans on a common
+ * {@link ManagerContext} for everything cross-cutting: binary resolution,
+ * persistence, event emission, and the data directory. `TunnelKit` builds the
+ * context and wires the three facades together — see `manager.ts`.
+ */
+
+import type { CloudflaredTunnel } from '../tunnel.js';
+import type { Logger } from '../logger.js';
+import type { TunnelStore } from '../store.js';
+import type { IngressInfo, ProgressCallback } from '../types.js';
+
+/** State and helpers the per-mode controllers need from the owning manager. */
+export interface ManagerContext {
+	/** Directory for cert.pem, tunnel credentials, and generated configs. */
+	readonly dataDir: string;
+	/** Directory holding the managed cloudflared binary. */
+	readonly installDir: string;
+	/** Resolved (never-undefined) logger. */
+	readonly log: Required<Logger>;
+	/** Quick-tunnel URL timeout in ms. */
+	readonly quickTimeoutMs: number;
+	/** Remote/local connection timeout in ms. */
+	readonly connectTimeoutMs: number;
+	/** Predicate used during name-conflict recovery (see TunnelKitOptions). */
+	readonly isTunnelKnown: (tunnelId: string) => boolean;
+	/** The persistence store backing auto-save, or `null` when disabled. */
+	readonly store: TunnelStore | null;
+	/** Path to the origin certificate this manager uses. */
+	readonly certPath: string;
+	/** cloudflared's default cert location, migrated into `dataDir` on first use. */
+	readonly defaultCloudflaredCert: string;
+	/** Resolve a usable binary path or throw {@link CloudflaredMissingError}. */
+	requireBinary(onProgress?: ProgressCallback): string;
+	/** Re-emit the aggregate `status-changed` event for the whole manager. */
+	emitStatus(): void;
+	/** Emit a remote `ingress-update` event. */
+	emitIngress(id: string, ingress: IngressInfo[]): void;
+	/** Create `dataDir` if it does not yet exist. */
+	ensureDataDir(): void;
+}
+
+export interface WaitForStartOptions<T> {
+	timeoutMs: number;
+	timeoutMessage: string;
+	failMessage: string;
+	attach: (succeed: (value: T) => void) => void;
+}
+
+/**
+ * Await a tunnel reaching its "started" state. Resolves with the value passed
+ * to `succeed` (e.g. the public URL), or rejects on timeout, process error, or
+ * a non-zero early exit — stopping the process in every failure path.
+ */
+export function waitForStart<T>(tunnel: CloudflaredTunnel, opts: WaitForStartOptions<T>): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		let settled = false;
+
+		const finish = (action: () => void): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			action();
+		};
+
+		const timer = setTimeout(() => finish(() => {
+			tunnel.stop();
+			reject(new Error(opts.timeoutMessage));
+		}), opts.timeoutMs);
+
+		opts.attach((value) => finish(() => resolve(value)));
+		tunnel.once('error', (error) => finish(() => {
+			tunnel.stop();
+			reject(error);
+		}));
+		tunnel.once('exit', (code) => {
+			if (code !== 0 && code !== null) finish(() => reject(new Error(opts.failMessage)));
+		});
+	});
+}

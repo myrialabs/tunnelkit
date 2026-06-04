@@ -13,12 +13,12 @@ import { TunnelKit } from '../src/index.js';
 
 const tk = new TunnelKit({ logger: console });
 
-if (!tk.checkAuth().authenticated) {
+if (!tk.local.checkAuth().authenticated) {
 	console.error('Not authenticated. Run examples/local.ts to log in first.');
 	process.exit(1);
 }
 
-const tunnels = await tk.listTunnels();
+const tunnels = await tk.local.list();
 console.log(`Account has ${tunnels.length} tunnel(s):`);
 for (const t of tunnels) {
 	console.log(`  ${t.name.padEnd(24)} ${t.id}  (${t.connections.length} active connection(s))`);
@@ -32,7 +32,7 @@ if (nameToDelete) {
 		process.exit(1);
 	}
 	console.log(`\nDeleting "${nameToDelete}" (${match.id})...`);
-	await tk.deleteTunnel(match.id);
-	tk.cleanupTunnelFiles(match.id);
+	await tk.local.delete(match.id);
+	tk.local.cleanupFiles(match.id);
 	console.log('Deleted.');
 }

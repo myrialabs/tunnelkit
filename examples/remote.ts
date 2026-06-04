@@ -27,7 +27,7 @@ tk.on('ingress-update', ({ id, ingress }) => {
 	console.log(`[${id}] ingress updated:`, ingress);
 });
 
-const { ingress } = await tk.startRemote({ id: 'prod', token, label: 'prod' });
+const { ingress } = await tk.remote.start({ id: 'prod', token, label: 'prod' });
 console.log('Connected. Ingress:', ingress);
 
 process.on('SIGINT', async () => {

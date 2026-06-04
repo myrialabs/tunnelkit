@@ -25,12 +25,12 @@ if (remotes.length === 0 && locals.length === 0) {
 
 for (const r of remotes) {
 	console.log(`Restoring remote: ${r.label}`);
-	await tk.startRemote({ id: r.id, token: r.token, label: r.label });
+	await tk.remote.start({ id: r.id, token: r.token, label: r.label });
 }
 
 for (const l of locals) {
 	console.log(`Restoring local: ${l.name}`);
-	await tk.startLocal({
+	await tk.local.start({
 		id: l.id,
 		name: l.name,
 		tunnelId: l.tunnelId,

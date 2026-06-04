@@ -28,7 +28,7 @@ const tk = new TunnelKit({ logger: console });
 if (!tk.isBinaryInstalled()) await tk.installBinary();
 
 // No autoStopMinutes → the tunnel stays up until you stop it.
-const { publicUrl } = await tk.startQuick({ service: port });
+const { publicUrl } = await tk.quick.start({ service: port });
 console.log(`\n  Public webhook URL: ${publicUrl}\n  Point your webhook here and watch requests arrive.\n`);
 
 const shutdown = async () => {

@@ -20,7 +20,7 @@ const tk = new TunnelKit({ logger });
 if (!tk.isBinaryInstalled()) await tk.installBinary();
 
 const service = process.argv[2] ?? '3000';
-const { publicUrl } = await tk.startQuick({ service });
+const { publicUrl } = await tk.quick.start({ service });
 console.log('URL:', publicUrl);
 
 process.on('SIGINT', async () => {

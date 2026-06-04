@@ -16,13 +16,21 @@ The CLI needs the `cloudflared` binary. It is downloaded automatically into
 tunnelkit <command> [options]
 ```
 
-- [Commands](#commands)
-  - [`quick`](#quick)
-  - [`remote`](#remote)
-  - [`local`](#local)
-  - [`login` / `logout`](#login--logout)
-  - [`list`](#list)
-  - [`delete`](#delete)
+Commands are grouped by the mode they belong to. Each mode is a namespace, so
+it's always clear which mode an operation is for — for example authentication is
+`tunnelkit local login`, because only named (local) tunnels touch your Cloudflare
+account. Quick needs no account, and remote runs from a token.
+
+- [Quick](#quick)
+  - [`quick`](#quick-1)
+- [Remote](#remote)
+  - [`remote run`](#remote-run)
+- [Local](#local)
+  - [`local login` / `local logout`](#local-login--local-logout)
+  - [`local run`](#local-run)
+  - [`local list`](#local-list)
+  - [`local delete`](#local-delete)
+- [General](#general)
   - [`saved` / `forget`](#saved--forget)
   - [`install`](#install)
   - [`status`](#status)
@@ -32,7 +40,7 @@ tunnelkit <command> [options]
 
 ---
 
-## Commands
+## Quick
 
 ### `quick`
 
@@ -57,14 +65,18 @@ tunnelkit quick https://127.0.0.1:8443
 
 No Cloudflare account is required.
 
-### `remote`
+---
+
+## Remote
+
+### `remote run`
 
 Run a dashboard-managed (token-based) tunnel. Ingress is configured in the
 Cloudflare Zero Trust dashboard and pushed to the tunnel at runtime — hostnames
 are printed as they arrive. Runs in the foreground until `Ctrl+C`.
 
 ```sh
-tunnelkit remote [name] [--token <token>] [--label <label>] [--id <id>]
+tunnelkit remote run [name] [--token <token>] [--label <label>] [--id <id>]
 ```
 
 | Option | Default | Description |
@@ -79,29 +91,48 @@ token the first time:
 
 ```sh
 # (a) as a flag
-tunnelkit remote --token "$CF_TUNNEL_TOKEN" --label prod
+tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --label prod
 
 # (b) via the environment
-CF_TUNNEL_TOKEN=… tunnelkit remote --label prod
+CF_TUNNEL_TOKEN=… tunnelkit remote run --label prod
 ```
 
 Either of the above saves the token under `prod`, so later you can just:
 
 ```sh
-tunnelkit remote prod
+tunnelkit remote run prod
 ```
 
 Pass `--no-save` to run without reading or writing the saved store.
 
-### `local`
+---
+
+## Local
+
+Local tunnels are the only mode that talks to your Cloudflare account, so
+authentication, listing, and deleting all live under `local`.
+
+### `local login` / `local logout`
+
+`local login` authenticates with Cloudflare for named tunnels. It prints an
+authorization URL — open it in a browser and approve. The origin certificate is
+saved under `~/.tunnelkit`. `local logout` removes that certificate.
+
+```sh
+tunnelkit local login
+tunnelkit local logout
+```
+
+### `local run`
 
 Create a named tunnel, route one or more hostnames to it, and run it — the full
 local lifecycle in one command. Requires that you have authenticated first with
-[`tunnelkit login`](#login--logout). Runs in the foreground until `Ctrl+C`.
+[`tunnelkit local login`](#local-login--local-logout). Runs in the foreground
+until `Ctrl+C`.
 
 ```sh
-tunnelkit local <name> --route <hostname=service> [--route …]
-tunnelkit local <name> --hostname <host> --service <url>
+tunnelkit local run <name> --route <hostname=service> [--route …]
+tunnelkit local run <name> --hostname <host> --service <url>
 ```
 
 | Option | Description |
@@ -112,8 +143,8 @@ tunnelkit local <name> --hostname <host> --service <url>
 | `--service <url>` | The local service for `--hostname`. |
 
 ```sh
-tunnelkit local my-app --route app.example.com=http://localhost:3000
-tunnelkit local my-app \
+tunnelkit local run my-app --route app.example.com=http://localhost:3000
+tunnelkit local run my-app \
   --route app.example.com=http://localhost:3000 \
   --route api.example.com=http://localhost:4000
 ```
@@ -122,7 +153,7 @@ The tunnel and its routes are saved, so you can rerun it later without
 respecifying anything:
 
 ```sh
-tunnelkit local my-app    # reuse the saved tunnel + routes
+tunnelkit local run my-app    # reuse the saved tunnel + routes
 ```
 
 Pass `--no-save` to skip saving (and to ignore any previously saved tunnel of
@@ -132,42 +163,35 @@ Hostnames must belong to a zone in your authenticated Cloudflare account. If a
 tunnel with the same name already exists on Cloudflare but isn't in use, it is
 treated as an orphan and recreated.
 
-### `login` / `logout`
-
-`login` authenticates with Cloudflare for named (local) tunnels. It prints an
-authorization URL — open it in a browser and approve. The origin certificate is
-saved under `~/.tunnelkit`. `logout` removes that certificate.
-
-```sh
-tunnelkit login
-tunnelkit logout
-```
-
-### `list`
+### `local list`
 
 List every named tunnel on the authenticated account, with its id and active
-connection count. Requires `tunnelkit login`.
+connection count. Requires `tunnelkit local login`.
 
 ```sh
-tunnelkit list
+tunnelkit local list
 ```
 
-### `delete`
+### `local delete`
 
-Delete a named tunnel by name or id. Requires `tunnelkit login`.
+Delete a named tunnel by name or id. Requires `tunnelkit local login`.
 
 ```sh
-tunnelkit delete my-app
-tunnelkit delete 6d8e…-uuid
+tunnelkit local delete my-app
+tunnelkit local delete 6d8e…-uuid
 ```
 
 Deleting also drops any locally-saved entry for that tunnel (see below).
 
+---
+
+## General
+
 ### `saved` / `forget`
 
-The CLI remembers tunnels you run so you can reuse them by name — `remote` saves
-its token, `local` saves its tunnel and routes. These commands inspect and prune
-that local store (`<dataDir>/config.json`); neither touches Cloudflare.
+The CLI remembers tunnels you run so you can reuse them by name — `remote run`
+saves its token, `local run` saves its tunnel and routes. These commands inspect
+and prune that local store (`<dataDir>/config.json`); neither touches Cloudflare.
 
 ```sh
 tunnelkit saved            # list saved remote + local tunnels
@@ -175,8 +199,8 @@ tunnelkit forget prod      # remove the saved "prod" entry
 ```
 
 `forget` only removes the saved config. To also delete a named tunnel from
-Cloudflare, use [`delete`](#delete). Use `--no-save` on any run to skip the store
-entirely.
+Cloudflare, use [`local delete`](#local-delete). Use `--no-save` on any run to
+skip the store entirely.
 
 ### `install`
 
@@ -210,7 +234,7 @@ These apply to every command.
 
 | Option | Description |
 | --- | --- |
-| `--no-save` | Don't read or write the saved-config store (`<dataDir>/config.json`) for this run. Applies to `remote` and `local`. |
+| `--no-save` | Don't read or write the saved-config store (`<dataDir>/config.json`) for this run. Applies to `remote run` and `local run`. |
 | `--data-dir <dir>` | Override the data directory (`cert.pem`, credentials, configs, saved store). Default `~/.tunnelkit`. |
 | `--install-dir <dir>` | Override the managed binary directory. Default `~/.tunnelkit/bin`. |
 | `--verbose` | Print the library's internal diagnostics to stderr. |

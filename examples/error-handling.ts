@@ -15,13 +15,13 @@ const tk = new TunnelKit({ logger: console, quickTimeoutMs: 8000 });
 
 async function startWithRecovery(port: number) {
 	try {
-		const { publicUrl } = await tk.startQuick({ service: port });
+		const { publicUrl } = await tk.quick.start({ service: port });
 		console.log('Started:', publicUrl);
 	} catch (err) {
 		if (err instanceof CloudflaredMissingError) {
 			console.log('cloudflared not found — installing, then retrying once...');
 			await tk.installBinary();
-			const { publicUrl } = await tk.startQuick({ service: port });
+			const { publicUrl } = await tk.quick.start({ service: port });
 			console.log('Started after install:', publicUrl);
 			return;
 		}

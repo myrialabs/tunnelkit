@@ -21,7 +21,7 @@ tk.on('status-changed', (tunnels) => {
 });
 
 // Start them concurrently (a bare port is shorthand for http://localhost:<port>).
-await Promise.all(services.map((service) => tk.startQuick({ service })));
+await Promise.all(services.map((service) => tk.quick.start({ service })));
 
 console.log(`\nStarted ${services.length} tunnels. Ctrl-C to stop all.`);
 

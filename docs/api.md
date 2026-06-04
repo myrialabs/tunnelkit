@@ -21,6 +21,17 @@ High-level orchestration over all three tunnel modes. A typed `EventEmitter`.
 new TunnelKit(options?: TunnelKitOptions)
 ```
 
+Each mode is reached through its own namespace, so it's always clear which mode
+an operation belongs to:
+
+- `tk.quick` — quick (TryCloudflare) tunnels.
+- `tk.remote` — remote (token-based) tunnels.
+- `tk.local` — local (named) tunnels **and** all Cloudflare-account operations
+  (`login`, `list`, `delete`, …), since only named tunnels touch your account.
+
+Cross-cutting concerns — the binary, the aggregate `list()`/`stopAll()`, the
+store, and events — stay on `tk` itself.
+
 ### TunnelKitOptions
 
 | Option | Type | Default | Description |
@@ -41,54 +52,56 @@ new TunnelKit(options?: TunnelKitOptions)
 | `getBinaryStatus()` | `BinaryStatus` | `{ installed, version, path }`. |
 | `installBinary(version?)` | `Promise<string>` | Download cloudflared; returns its path. |
 
-### Quick tunnel
+### Quick tunnel — `tk.quick`
 
 ```ts
-startQuick(opts: { service: string | number; autoStopMinutes?: number }, onProgress?: ProgressCallback)
+tk.quick.start(opts: { service: string | number; autoStopMinutes?: number }, onProgress?: ProgressCallback)
   : Promise<{ id: string; service: string; publicUrl: string; timings: Record<string, number> }>
-stopQuick(service: string | number): Promise<void>
+tk.quick.stop(service: string | number): Promise<void>
+tk.quick.isActive(service: string | number): boolean
 ```
 
-`service` is the proxy target: a bare port number (`3000`) is shorthand for `http://localhost:3000`; a full URL is used as-is. `autoStopMinutes` defaults to `0` (no auto-stop). `stopQuick` accepts the same port/URL you started with, or the returned `id` (`quick:<service>`).
+`service` is the proxy target: a bare port number (`3000`) is shorthand for `http://localhost:3000`; a full URL is used as-is. `autoStopMinutes` defaults to `0` (no auto-stop). `tk.quick.stop` accepts the same port/URL you started with, or the returned `id` (`quick:<service>`).
 
-### Remote tunnel
+### Remote tunnel — `tk.remote`
 
 ```ts
-startRemote(opts: { id: string; token: string; label?: string }, onProgress?: ProgressCallback)
+tk.remote.start(opts: { id: string; token: string; label?: string }, onProgress?: ProgressCallback)
   : Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }>
-stopRemote(id: string): Promise<void>
-getRemoteIngress(id: string): IngressInfo[]
-isRemoteActive(id: string): boolean
+tk.remote.stop(id: string): Promise<void>
+tk.remote.ingress(id: string): IngressInfo[]
+tk.remote.isActive(id: string): boolean
 ```
 
-### Local tunnel
+### Local tunnel — `tk.local`
 
 ```ts
-checkAuth(): { authenticated: boolean; certPath: string }
-getCertPath(): string
-login(callbacks: LoginCallbacks): void          // { onUrl, onComplete, onError }
-cancelLogin(): void
-logout(): { success: boolean }
+tk.local.checkAuth(): { authenticated: boolean; certPath: string }
+tk.local.certPath(): string
+tk.local.login(callbacks: LoginCallbacks): void          // { onUrl, onComplete, onError }
+tk.local.cancelLogin(): void
+tk.local.logout(): { success: boolean }
 
-createTunnel(name: string): Promise<{ tunnelId: string; credentialsFile: string }>
-deleteTunnel(tunnelId: string, credentialsFile?: string): Promise<void>
-cleanupTunnelFiles(tunnelId: string): void
-routeDns(tunnelName: string, hostname: string): Promise<{ alreadyExists: boolean }>
-writeLocalConfig(config: { tunnelId; credentialsFile; ingress }): string  // returns config.yml path
+tk.local.create(name: string): Promise<{ tunnelId: string; credentialsFile: string }>
+tk.local.delete(tunnelId: string, credentialsFile?: string): Promise<void>
+tk.local.cleanupFiles(tunnelId: string): void
+tk.local.routeDns(tunnelName: string, hostname: string): Promise<{ alreadyExists: boolean }>
+tk.local.writeConfig(config: { tunnelId; credentialsFile; ingress }): string  // returns config.yml path
+tk.local.list(): Promise<TunnelListEntry[]>              // every named tunnel on the account
 
-startLocal(config: LocalTunnelConfig, onProgress?: ProgressCallback)
+tk.local.start(config: LocalTunnelConfig, onProgress?: ProgressCallback)
   : Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }>
-stopLocal(id: string): Promise<void>
-isLocalActive(id: string): boolean
+tk.local.stop(id: string): Promise<void>
+tk.local.isActive(id: string): boolean
 ```
 
 `LocalTunnelConfig`: `{ id, name, tunnelId, credentialsFile, ingress: IngressInfo[] }`, where:
 
-- `id` — *your* handle for this tunnel in TunnelKit's registry (what you pass to `stopLocal`/`isLocalActive`). Choose whatever your app keys on.
-- `name` — the Cloudflare tunnel name (the one you passed to `createTunnel`).
-- `tunnelId` / `credentialsFile` — returned by `createTunnel`.
+- `id` — *your* handle for this tunnel in TunnelKit's registry (what you pass to `tk.local.stop`/`tk.local.isActive`). Choose whatever your app keys on.
+- `name` — the Cloudflare tunnel name (the one you passed to `tk.local.create`).
+- `tunnelId` / `credentialsFile` — returned by `tk.local.create`.
 
-`id` and `name` are independent: they may match, but they don't have to. `startLocal` throws if `ingress` is empty.
+`id` and `name` are independent: they may match, but they don't have to. `tk.local.start` throws if `ingress` is empty.
 
 ### Persistence
 
@@ -96,15 +109,18 @@ isLocalActive(id: string): boolean
 tk.store               // TunnelStore | null — the backing store (null when `store: false`)
 ```
 
-Remote and local tunnels are saved to `tk.store` automatically when they start (quick tunnels are not). Read them back to restore on startup, e.g. `for (const r of tk.store?.getRemotes() ?? []) await tk.startRemote(r)`. See [`TunnelStore`](#tunnelstore).
+Remote and local tunnels are saved to `tk.store` automatically when they start (quick tunnels are not). Read them back to restore on startup, e.g. `for (const r of tk.store?.getRemotes() ?? []) await tk.remote.start(r)`. See [`TunnelStore`](#tunnelstore).
 
-### Account & status
+### Status & lifecycle
+
+Aggregate operations across every mode, on `tk` itself:
 
 ```ts
-listTunnels(): Promise<TunnelListEntry[]>   // every named tunnel on the account
-list(): ActiveTunnel[]                       // tunnels this manager is running
-stopAll(): Promise<void>
+tk.list(): ActiveTunnel[]      // every tunnel this manager is running, all modes
+tk.stopAll(): Promise<void>    // stop every managed tunnel
 ```
+
+To list every named tunnel on your Cloudflare account (not just the running ones), use [`tk.local.list()`](#local-tunnel--tklocal).
 
 ### Events
 

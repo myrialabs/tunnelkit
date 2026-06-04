@@ -42,12 +42,12 @@ for (const [hostname, service] of routes) {
 	const existing = cfg.ingress.find((r) => r.hostname === hostname);
 	if (existing) existing.service = service;
 	else cfg.ingress.push({ hostname, service });
-	await tk.routeDns(cfg.name, hostname);
+	await tk.local.routeDns(cfg.name, hostname);
 	console.log(`Routed ${hostname} → ${service}`);
 }
 
 // Run it — TunnelKit persists the updated ingress to tk.store automatically.
-await tk.startLocal(cfg);
+await tk.local.start(cfg);
 console.log('\nServing:', cfg.ingress);
 
 process.on('SIGINT', async () => {

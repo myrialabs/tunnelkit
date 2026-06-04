@@ -20,7 +20,7 @@ tk.on('status-changed', (tunnels) => {
 	console.log('status-changed:', tunnels);
 });
 
-const { publicUrl, service: target } = await tk.startQuick({ service, autoStopMinutes: 10 });
+const { publicUrl, service: target } = await tk.quick.start({ service, autoStopMinutes: 10 });
 console.log(`\n  → ${publicUrl}  (proxying ${target})\n`);
 
 process.on('SIGINT', async () => {

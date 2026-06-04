@@ -10,7 +10,7 @@ import { TunnelKit } from 'tunnelkit';
 const tk = new TunnelKit();
 if (!tk.isBinaryInstalled()) await tk.installBinary();
 
-const { publicUrl } = await tk.startQuick({ service: 3000 }); // a bare port → http://localhost:3000
+const { publicUrl } = await tk.quick.start({ service: 3000 }); // a bare port → http://localhost:3000
 console.log(publicUrl); // https://random-words.trycloudflare.com
 ```
 
@@ -32,14 +32,16 @@ tunnelkit quick 3000    # → https://random-words.trycloudflare.com
 
 ## Feature matrix
 
+Each mode lives under its own namespace (`tk.quick`, `tk.remote`, `tk.local`).
+
 | Capability | API |
 | --- | --- |
-| Quick tunnel (TryCloudflare) | `startQuick` / `stopQuick` |
-| Remote tunnel (token) | `startRemote` / `stopRemote` / `getRemoteIngress` |
-| Local tunnel (named) | `login` / `createTunnel` / `routeDns` / `startLocal` / `stopLocal` / `deleteTunnel` |
-| Account tunnel list | `listTunnels` |
-| Auto-stop (quick) | `startQuick({ autoStopMinutes })` |
-| Live status / ingress | `'status-changed'` / `'ingress-update'` events, `list()` |
+| Quick tunnel (TryCloudflare) | `tk.quick.start` / `tk.quick.stop` |
+| Remote tunnel (token) | `tk.remote.start` / `tk.remote.stop` / `tk.remote.ingress` |
+| Local tunnel (named) | `tk.local.login` / `tk.local.create` / `tk.local.routeDns` / `tk.local.start` / `tk.local.stop` / `tk.local.delete` |
+| Account tunnel list | `tk.local.list` |
+| Auto-stop (quick) | `tk.quick.start({ autoStopMinutes })` |
+| Live status / ingress | `'status-changed'` / `'ingress-update'` events, `tk.list()` |
 | Binary install / status | `installBinary` / `isBinaryInstalled` / `getBinaryStatus` |
 | Config persistence | `TunnelStore` (on by default, API & CLI) |
 | Low-level process control | `CloudflaredTunnel` |
@@ -72,8 +74,8 @@ A random `*.trycloudflare.com` URL. No account, no config — great for demos an
 `service` is where traffic is proxied: a bare port is shorthand for `http://localhost:<port>`, or pass a full URL (`http://localhost:8080`, `https://192.168.1.5:8443`).
 
 ```ts
-const { publicUrl } = await tk.startQuick({ service: 8080, autoStopMinutes: 30 });
-await tk.stopQuick(8080); // by port, the full service URL, or the returned id
+const { publicUrl } = await tk.quick.start({ service: 8080, autoStopMinutes: 30 });
+await tk.quick.stop(8080); // by port, the full service URL, or the returned id
 ```
 
 ### Remote (token-based) tunnel
@@ -81,9 +83,9 @@ await tk.stopQuick(8080); // by port, the full service URL, or the returned id
 A tunnel created and configured in the Cloudflare dashboard, run locally from its token. Ingress is managed in the dashboard and pushed to cloudflared at runtime — surfaced via the `ingress-update` event and the resolved promise.
 
 ```ts
-const { ingress } = await tk.startRemote({ id: 'my-app', token: process.env.CF_TUNNEL_TOKEN! });
+const { ingress } = await tk.remote.start({ id: 'my-app', token: process.env.CF_TUNNEL_TOKEN! });
 tk.on('ingress-update', ({ id, ingress }) => console.log(id, ingress));
-await tk.stopRemote('my-app');
+await tk.remote.stop('my-app');
 ```
 
 ### Local (named) tunnel
@@ -93,18 +95,18 @@ A named tunnel you create and control from your machine: authenticate once, crea
 ```ts
 // 1. Authenticate (once) — surface the URL; the user approves in the browser.
 await new Promise<void>((resolve, reject) => {
-  tk.login({ onUrl: (url) => console.log('Authorize:', url), onComplete: resolve, onError: reject });
+  tk.local.login({ onUrl: (url) => console.log('Authorize:', url), onComplete: resolve, onError: reject });
 });
 
 // 2. Create the Cloudflare tunnel (named "acme-prod") and route a hostname to it.
-const { tunnelId, credentialsFile } = await tk.createTunnel('acme-prod');
-await tk.routeDns('acme-prod', 'app.example.com');
+const { tunnelId, credentialsFile } = await tk.local.create('acme-prod');
+await tk.local.routeDns('acme-prod', 'app.example.com');
 
 // 3. Run it. The two identifiers are different things:
 //    - `name` is the Cloudflare tunnel name (the one you created above).
 //    - `id`   is *your* handle for this tunnel in TunnelKit's registry — you pass
-//             it to stopLocal()/isLocalActive(), so make it whatever your app keys on.
-await tk.startLocal({
+//             it to tk.local.stop()/tk.local.isActive(), so make it whatever your app keys on.
+await tk.local.start({
   id: 'storefront',          // your app's identifier
   name: 'acme-prod',         // the Cloudflare tunnel name
   tunnelId,
@@ -112,10 +114,10 @@ await tk.startLocal({
   ingress: [{ hostname: 'app.example.com', service: 'http://localhost:3000' }]
 });
 
-// later: await tk.stopLocal('storefront');
+// later: await tk.local.stop('storefront');
 ```
 
-`createTunnel` includes orphan recovery: if a same-named tunnel exists on Cloudflare but isn't known locally and has no active connections, it's deleted and the create retried. Guard tunnels you track with the `isTunnelKnown` option.
+`tk.local.create` includes orphan recovery: if a same-named tunnel exists on Cloudflare but isn't known locally and has no active connections, it's deleted and the create retried. Guard tunnels you track with the `isTunnelKnown` option.
 
 ## CLI
 
@@ -124,18 +126,25 @@ Installing globally puts a `tunnelkit` command on your `PATH` that drives the sa
 ```sh
 tunnelkit quick 3000                                  # quick tunnel (3000 → localhost:3000)
 tunnelkit quick http://localhost:8080 --auto-stop 30  # full URL + auto-stop after 30 min
-tunnelkit remote --token "$CF_TUNNEL_TOKEN" --label prod  # token-based tunnel, saved as "prod"
-tunnelkit remote prod                                 # reuse the saved "prod" token
-tunnelkit login                                       # authenticate (named tunnels)
-tunnelkit local my-app --route app.example.com=http://localhost:3000
-tunnelkit local my-app                                # rerun the saved "my-app" tunnel
-tunnelkit list                                        # named tunnels on your account
+tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --label prod  # token-based tunnel, saved as "prod"
+tunnelkit remote run prod                             # reuse the saved "prod" token
+tunnelkit local login                                 # authenticate (named tunnels)
+tunnelkit local run my-app --route app.example.com=http://localhost:3000
+tunnelkit local run my-app                            # rerun the saved "my-app" tunnel
+tunnelkit local list                                  # named tunnels on your account
 tunnelkit install                                     # download cloudflared
 tunnelkit status                                      # binary status
 tunnelkit help
 ```
 
-Run commands like `quick`, `remote`, and `local` stay in the foreground and shut the tunnel down cleanly on `Ctrl+C`. The binary is downloaded automatically on first use if it isn't already available. The CLI remembers named tunnels by default (under `~/.tunnelkit`) so you can reuse them; pass `--no-save` to opt out. See [`docs/cli.md`](./docs/cli.md) for every command and flag.
+Commands are grouped by mode: `quick`, `remote run`, and the `local` family
+(`login`, `run`, `list`, `delete`). Authentication lives under `local` because
+only named tunnels touch your Cloudflare account. The run commands stay in the
+foreground and shut the tunnel down cleanly on `Ctrl+C`. The binary is
+downloaded automatically on first use if it isn't already available. The CLI
+remembers named tunnels by default (under `~/.tunnelkit`) so you can reuse them;
+pass `--no-save` to opt out. See [`docs/cli.md`](./docs/cli.md) for every command
+and flag.
 
 ## Events
 
@@ -164,7 +173,7 @@ Read saved tunnels back from `tk.store` — e.g. to restore everything on startu
 
 ```ts
 const tk = new TunnelKit();
-for (const r of tk.store?.getRemotes() ?? []) await tk.startRemote(r);
+for (const r of tk.store?.getRemotes() ?? []) await tk.remote.start(r);
 ```
 
 For advanced cases (sharing one store across components, a custom logger) you can pass your own `TunnelStore` instance as `store`; and since `TunnelStore` has no dependency on `TunnelKit`, you can also use it standalone:
@@ -221,7 +230,7 @@ tunnelkit doesn't replace the `cloudflared` binary — it *drives* it, replacing
 | | `cloudflared` npm | tunnelkit |
 | --- | --- | --- |
 | Quick tunnels | ✅ | ✅ |
-| Token / config tunnels | pass flags yourself | first-class `startRemote` / `startLocal` |
+| Token / config tunnels | pass flags yourself | first-class `tk.remote.start` / `tk.local.start` |
 | High-level manager (lifecycle, timeouts, auto-stop, registry) | ❌ | ✅ `TunnelKit` |
 | login / create / delete / route-dns / list helpers | ❌ | ✅ |
 | `config.yml` generation + orphan recovery | ❌ | ✅ |
