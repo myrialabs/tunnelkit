@@ -7,12 +7,13 @@
  * can also be used directly from a terminal (`npm i -g tunnelkit` / `bun add -g
  * tunnelkit`). It covers every tunnel mode the library exposes:
  *
- *   tunnelkit quick <port>            Quick TryCloudflare tunnel
+ *   tunnelkit quick <port|url>        Quick TryCloudflare tunnel
  *   tunnelkit remote --token <token>  Token-based (dashboard-managed) tunnel
  *   tunnelkit local <name> --route …  Named tunnel (login → create → route → run)
  *   tunnelkit login | logout          Cloudflare authentication
  *   tunnelkit list                    List named tunnels on the account
  *   tunnelkit delete <name>           Delete a named tunnel
+ *   tunnelkit saved | forget <name>   Inspect / remove locally-saved tunnels
  *   tunnelkit install [version]       Download the cloudflared binary
  *   tunnelkit status                  Show binary status
  *   tunnelkit version | help
@@ -26,7 +27,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 
-import { TunnelKit } from './manager.js';
+import { TunnelKit, resolveQuickService } from './manager.js';
+import { TunnelStore } from './store.js';
 import { CloudflaredMissingError } from './tunnel.js';
 import type { Logger } from './logger.js';
 import { parseCliArgs, firstValue, type ParsedArgs } from './cli-args.js';
@@ -100,6 +102,18 @@ function makeKit(parsed: ParsedArgs): TunnelKit {
 	});
 }
 
+/**
+ * The CLI persists tunnel config by default so labels can be reused
+ * (`tunnelkit remote prod`). `--no-save` opts out of both reading and writing.
+ */
+function makeStore(parsed: ParsedArgs): TunnelStore | null {
+	if (parsed.flags.has('no-save')) return null;
+	return new TunnelStore({
+		dataDir: firstValue(parsed, 'data-dir'),
+		logger: parsed.flags.has('verbose') ? verboseLogger : undefined
+	});
+}
+
 /** Resolve cloudflared, downloading it on demand if nothing is available. */
 async function ensureBinary(tk: TunnelKit): Promise<void> {
 	if (tk.getBinaryStatus().installed) return;
@@ -148,11 +162,11 @@ function gatherRoutes(parsed: ParsedArgs): { hostname: string; service: string }
 // --- Commands ---
 
 async function cmdQuick(parsed: ParsedArgs): Promise<void> {
-	const portStr = parsed.positionals[0] ?? firstValue(parsed, 'port');
-	const port = Number(portStr);
-	if (!portStr || !Number.isInteger(port) || port < 1 || port > 65535) {
-		throw new Error('quick requires a port, e.g. `tunnelkit quick 3000`');
+	const service = parsed.positionals[0];
+	if (!service) {
+		throw new Error('quick requires a port or URL, e.g. `tunnelkit quick 3000` or `tunnelkit quick http://localhost:3000`');
 	}
+	resolveQuickService(service); // validate up front, before any binary download
 
 	const autoStopStr = firstValue(parsed, 'auto-stop');
 	const autoStopMinutes = autoStopStr !== undefined ? Number(autoStopStr) : undefined;
@@ -163,23 +177,55 @@ async function cmdQuick(parsed: ParsedArgs): Promise<void> {
 	const tk = makeKit(parsed);
 	await ensureBinary(tk);
 
-	const spin = spinner(`Starting quick tunnel for http://localhost:${port}…`);
-	const { publicUrl } = await tk.startQuick({ port, url: firstValue(parsed, 'url'), autoStopMinutes });
+	const spin = spinner(`Starting quick tunnel for ${service}…`);
+	let started;
+	try {
+		started = await tk.startQuick({ service, autoStopMinutes });
+	} catch (error) {
+		spin.stop();
+		throw error;
+	}
 	spin.stop();
 
-	out(`\n  ${c.green('●')} ${c.bold(publicUrl)}`);
-	out(c.dim(`    → proxying ${firstValue(parsed, 'url') ?? `http://localhost:${port}`}`));
+	out(`\n  ${c.green('●')} ${c.bold(started.publicUrl)}`);
+	out(c.dim(`    → proxying ${started.service}`));
 	if (autoStopMinutes && autoStopMinutes > 0) out(c.dim(`    auto-stops in ${autoStopMinutes} min`));
 	runUntilInterrupted(tk);
 }
 
 async function cmdRemote(parsed: ParsedArgs): Promise<void> {
-	const token = firstValue(parsed, 'token') ?? process.env.CF_TUNNEL_TOKEN;
+	const name = parsed.positionals[0];
+	const store = makeStore(parsed);
+
+	// Token precedence: --token / CF_TUNNEL_TOKEN, else a saved entry by name.
+	const explicitToken = firstValue(parsed, 'token') ?? process.env.CF_TUNNEL_TOKEN;
+	const saved = !explicitToken && name && store
+		? store.getRemotes().find((r) => r.label === name || r.id === name)
+		: undefined;
+	const token = explicitToken ?? saved?.token;
 	if (!token) {
-		throw new Error('remote requires a token via --token <token> or the CF_TUNNEL_TOKEN env var');
+		throw new Error(
+			name
+				? `No saved tunnel named "${name}". Provide a token with --token <token> (or set CF_TUNNEL_TOKEN).`
+				: 'remote requires a token via --token <token> or the CF_TUNNEL_TOKEN env var (or a saved name).'
+		);
 	}
-	const id = firstValue(parsed, 'id') ?? 'cli-remote';
-	const label = firstValue(parsed, 'label');
+
+	const label = firstValue(parsed, 'label') ?? saved?.label ?? name;
+	const id = firstValue(parsed, 'id') ?? saved?.id ?? name ?? 'cli-remote';
+
+	// Persist a freshly-provided token under a meaningful name, so it can be reused.
+	const persistKey = firstValue(parsed, 'label') ?? name;
+	if (store && explicitToken && persistKey) {
+		const existing = store.getRemotes().find((r) => r.label === persistKey);
+		if (!existing) {
+			store.addRemote(persistKey, explicitToken);
+			out(c.dim(`  saved as "${persistKey}" — reuse with \`tunnelkit remote ${persistKey}\``));
+		} else if (existing.token !== explicitToken) {
+			store.removeRemote(existing.id);
+			store.addRemote(persistKey, explicitToken);
+		}
+	}
 
 	const tk = makeKit(parsed);
 	tk.on('ingress-update', ({ ingress }) => {
@@ -205,16 +251,30 @@ async function cmdLocal(parsed: ParsedArgs): Promise<void> {
 	const name = parsed.positionals[0];
 	if (!name) throw new Error('local requires a tunnel name, e.g. `tunnelkit local my-app --route app.example.com=http://localhost:3000`');
 
+	const store = makeStore(parsed);
 	const routes = gatherRoutes(parsed);
-	if (routes.length === 0) {
-		throw new Error('local requires at least one --route hostname=service (or --hostname/--service)');
-	}
 
 	const tk = makeKit(parsed);
 	await ensureBinary(tk);
 
 	if (!tk.checkAuth().authenticated) {
 		throw new Error('Not authenticated with Cloudflare. Run `tunnelkit login` first.');
+	}
+
+	// No routes given: re-run a previously saved tunnel of the same name.
+	if (routes.length === 0) {
+		const previous = store?.getLocals().find((l) => l.name === name);
+		if (!previous || previous.ingress.length === 0) {
+			throw new Error('local requires at least one --route hostname=service (or --hostname/--service), or a previously saved tunnel of the same name');
+		}
+		const startSpin = spinner(`Starting saved tunnel "${name}"…`);
+		await tk.startLocal({ id: name, name, tunnelId: previous.tunnelId, credentialsFile: previous.credentialsFile, ingress: previous.ingress });
+		startSpin.stop();
+
+		out(`\n  ${c.green('●')} ${c.bold(name)} ${c.dim('connected')}`);
+		for (const route of previous.ingress) out(c.dim(`    https://${route.hostname} → ${route.service}`));
+		runUntilInterrupted(tk);
+		return;
 	}
 
 	const createSpin = spinner(`Creating tunnel "${name}"…`);
@@ -231,8 +291,20 @@ async function cmdLocal(parsed: ParsedArgs): Promise<void> {
 	await tk.startLocal({ id: name, name, tunnelId, credentialsFile, ingress: routes });
 	startSpin.stop();
 
+	// Persist the tunnel + its routes so `tunnelkit local <name>` can re-run it.
+	if (store) {
+		let entry = store.getLocals().find((l) => l.name === name);
+		if (entry && (entry.tunnelId !== tunnelId || entry.credentialsFile !== credentialsFile)) {
+			store.removeLocal(entry.id);
+			entry = undefined;
+		}
+		entry ??= store.addLocal(name, tunnelId, credentialsFile);
+		for (const route of routes) store.addLocalIngress(entry.id, route.hostname, route.service);
+	}
+
 	out(`\n  ${c.green('●')} ${c.bold(name)} ${c.dim('connected')}`);
 	for (const route of routes) out(c.dim(`    https://${route.hostname} → ${route.service}`));
+	if (store) out(c.dim(`    saved — rerun with \`tunnelkit local ${name}\``));
 	runUntilInterrupted(tk);
 }
 
@@ -306,6 +378,63 @@ async function cmdDelete(parsed: ParsedArgs): Promise<void> {
 	const spin = spinner(`Deleting "${target}"…`);
 	await tk.deleteTunnel(target);
 	spin.stop(c.green(`✓ Deleted ${target}.`));
+
+	// Keep the saved store consistent: drop any local entry for this tunnel.
+	const store = makeStore(parsed);
+	const saved = store?.getLocals().find((l) => l.name === target || l.id === target);
+	if (store && saved) store.removeLocal(saved.id);
+}
+
+function cmdSaved(parsed: ParsedArgs): void {
+	const store = makeStore(parsed);
+	if (!store) {
+		out(c.dim('Saved store disabled (--no-save).'));
+		return;
+	}
+
+	const remotes = store.getRemotes();
+	const locals = store.getLocals();
+	if (remotes.length === 0 && locals.length === 0) {
+		out(c.dim('No saved tunnels.'));
+		out(c.dim(`  ${store.path}`));
+		return;
+	}
+
+	if (remotes.length > 0) {
+		out(c.bold('REMOTE'));
+		for (const r of remotes) out(`  ${r.label}  ${c.dim(r.id)}`);
+	}
+	if (locals.length > 0) {
+		if (remotes.length > 0) out('');
+		out(c.bold('LOCAL'));
+		for (const l of locals) {
+			const hosts = l.ingress.map((i) => i.hostname).filter(Boolean).join(', ');
+			out(`  ${l.name}  ${c.dim(l.tunnelId)}${hosts ? `  ${c.dim(`→ ${hosts}`)}` : ''}`);
+		}
+	}
+	out(c.dim(`\n  reuse with \`tunnelkit remote <name>\` / \`tunnelkit local <name>\`, remove with \`tunnelkit forget <name>\``));
+}
+
+function cmdForget(parsed: ParsedArgs): void {
+	const target = parsed.positionals[0];
+	if (!target) throw new Error('forget requires a saved name, e.g. `tunnelkit forget prod`');
+
+	const store = makeStore(parsed);
+	if (!store) throw new Error('Cannot forget a saved tunnel while --no-save is set.');
+
+	const remote = store.getRemotes().find((r) => r.label === target || r.id === target);
+	if (remote) {
+		store.removeRemote(remote.id);
+		out(c.green(`✓ Forgot remote "${target}". (The Cloudflare tunnel itself is untouched.)`));
+		return;
+	}
+	const local = store.getLocals().find((l) => l.name === target || l.id === target);
+	if (local) {
+		store.removeLocal(local.id);
+		out(c.green(`✓ Forgot local "${target}". (Run \`tunnelkit delete ${target}\` to also remove it from Cloudflare.)`));
+		return;
+	}
+	out(c.yellow(`No saved tunnel named "${target}".`));
 }
 
 async function cmdInstall(parsed: ParsedArgs): Promise<void> {
@@ -341,27 +470,29 @@ ${c.bold('USAGE')}
   tunnelkit <command> [options]
 
 ${c.bold('COMMANDS')}
-  quick <port>                 Start a quick TryCloudflare tunnel to localhost:<port>
-  remote                       Run a token-based tunnel (--token or CF_TUNNEL_TOKEN)
+  quick <port|url>             Start a quick TryCloudflare tunnel (port → localhost:<port>)
+  remote [name]                Run a token-based tunnel (--token, CF_TUNNEL_TOKEN, or a saved name)
   local <name>                 Create + route + run a named tunnel (requires login)
   login                        Authenticate with Cloudflare (for named tunnels)
   logout                       Remove the stored origin certificate
   list                         List named tunnels on the account
-  delete <name|id>             Delete a named tunnel
+  delete <name|id>             Delete a named tunnel (from Cloudflare)
+  saved                        List tunnels saved locally for reuse
+  forget <name>                Remove a saved tunnel (leaves Cloudflare untouched)
   install [version]            Download the cloudflared binary (default: latest)
   status                       Show the cloudflared binary status
   version                      Print the tunnelkit version
   help                         Show this help
 
 ${c.bold('OPTIONS')}
-  --url <url>                  quick: target URL (default http://localhost:<port>)
-  --auto-stop <minutes>        quick: minutes until auto-stop (0 disables; default 60)
+  --auto-stop <minutes>        quick: minutes until auto-stop (default 0 — never)
   --token <token>              remote: tunnel token (or set CF_TUNNEL_TOKEN)
+  --label <label>              remote: friendly name (used to save & reuse the token)
   --id <id>                    remote: stable id for the tunnel (default cli-remote)
-  --label <label>             remote: friendly label
   --route <hostname=service>   local: ingress rule (repeatable)
   --hostname <host>            local: single ingress hostname (pair with --service)
   --service <url>              local: single ingress service URL
+  --no-save                    don't read or write the saved-config store for this run
   --data-dir <dir>             override the data dir (default ~/.tunnelkit)
   --install-dir <dir>          override the binary dir (default ~/.tunnelkit/bin)
   --verbose                    print library diagnostics to stderr
@@ -370,10 +501,12 @@ ${c.bold('OPTIONS')}
 
 ${c.bold('EXAMPLES')}
   tunnelkit quick 3000
-  tunnelkit quick 8080 --auto-stop 30
-  tunnelkit remote --token "$CF_TUNNEL_TOKEN"
+  tunnelkit quick http://localhost:8080 --auto-stop 30
+  tunnelkit remote --token "$CF_TUNNEL_TOKEN" --label prod
+  tunnelkit remote prod                      # reuse the saved "prod" token
   tunnelkit login
   tunnelkit local my-app --route app.example.com=http://localhost:3000
+  tunnelkit local my-app                     # rerun the saved "my-app" tunnel
   tunnelkit install 2024.12.2
 
 Docs: https://github.com/myrialabs/tunnelkit
@@ -390,6 +523,8 @@ const COMMANDS: Record<string, (parsed: ParsedArgs) => void | Promise<void>> = {
 	logout: cmdLogout,
 	list: cmdList,
 	delete: cmdDelete,
+	saved: cmdSaved,
+	forget: cmdForget,
 	install: cmdInstall,
 	status: cmdStatus
 };
@@ -416,7 +551,7 @@ async function main(): Promise<void> {
 	}
 
 	const parsed = parseCliArgs(argv.slice(1), {
-		booleans: ['verbose', 'help', 'force'],
+		booleans: ['verbose', 'help', 'force', 'no-save'],
 		aliases: { h: 'help', v: 'version' }
 	});
 	await handler(parsed);

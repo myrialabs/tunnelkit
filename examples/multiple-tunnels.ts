@@ -9,8 +9,8 @@
 
 import { TunnelKit } from '../src/index.js';
 
-const ports = process.argv.slice(2).map(Number).filter((n) => n > 0);
-if (ports.length === 0) ports.push(3000, 3001);
+const services = process.argv.slice(2).filter(Boolean);
+if (services.length === 0) services.push('3000', '3001');
 
 const tk = new TunnelKit({ logger: console });
 if (!tk.isBinaryInstalled()) await tk.installBinary();
@@ -20,10 +20,10 @@ tk.on('status-changed', (tunnels) => {
 	for (const t of tunnels) console.log(`  ${t.id.padEnd(12)} → ${t.publicUrl}`);
 });
 
-// Start them concurrently.
-await Promise.all(ports.map((port) => tk.startQuick({ port, autoStopMinutes: 0 })));
+// Start them concurrently (a bare port is shorthand for http://localhost:<port>).
+await Promise.all(services.map((service) => tk.startQuick({ service })));
 
-console.log(`\nStarted ${ports.length} tunnels. Ctrl-C to stop all.`);
+console.log(`\nStarted ${services.length} tunnels. Ctrl-C to stop all.`);
 
 process.on('SIGINT', async () => {
 	await tk.stopAll();

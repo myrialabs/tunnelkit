@@ -27,8 +27,8 @@ server.listen(port, () => console.log(`Local server listening on http://localhos
 const tk = new TunnelKit({ logger: console });
 if (!tk.isBinaryInstalled()) await tk.installBinary();
 
-// autoStopMinutes: 0 → keep the tunnel up until you stop it.
-const { publicUrl } = await tk.startQuick({ port, autoStopMinutes: 0 });
+// No autoStopMinutes → the tunnel stays up until you stop it.
+const { publicUrl } = await tk.startQuick({ service: port });
 console.log(`\n  Public webhook URL: ${publicUrl}\n  Point your webhook here and watch requests arrive.\n`);
 
 const shutdown = async () => {

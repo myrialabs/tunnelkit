@@ -13,7 +13,7 @@
 
 import { join } from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { resolveLogger, type Logger } from './logger.js';
 import type { IngressInfo } from './types.js';
@@ -78,7 +78,15 @@ export class TunnelStore {
 
 	private write(data: StoreFile): void {
 		if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
-		writeFileSync(this.file, JSON.stringify(data, null, '\t'), 'utf-8');
+		// The store can hold tunnel tokens — keep it readable only by the owner.
+		// `mode` on writeFileSync only applies when the file is first created, so
+		// chmod explicitly to also tighten a pre-existing file.
+		writeFileSync(this.file, JSON.stringify(data, null, '\t'), { encoding: 'utf-8', mode: 0o600 });
+		try {
+			chmodSync(this.file, 0o600);
+		} catch {
+			// Best-effort: some filesystems/platforms (e.g. Windows) don't support it.
+		}
 	}
 
 	// --- Remote tunnels ---

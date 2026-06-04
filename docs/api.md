@@ -43,12 +43,12 @@ new TunnelKit(options?: TunnelKitOptions)
 ### Quick tunnel
 
 ```ts
-startQuick(opts: { port: number; url?: string; autoStopMinutes?: number }, onProgress?: ProgressCallback)
-  : Promise<{ id: string; publicUrl: string; timings: Record<string, number> }>
-stopQuick(port: number): Promise<void>
+startQuick(opts: { service: string | number; autoStopMinutes?: number }, onProgress?: ProgressCallback)
+  : Promise<{ id: string; service: string; publicUrl: string; timings: Record<string, number> }>
+stopQuick(service: string | number): Promise<void>
 ```
 
-`autoStopMinutes` defaults to `60`; `0` disables auto-stop. `url` overrides the default `http://localhost:<port>` target.
+`service` is the proxy target: a bare port number (`3000`) is shorthand for `http://localhost:3000`; a full URL is used as-is. `autoStopMinutes` defaults to `0` (no auto-stop). `stopQuick` accepts the same port/URL you started with, or the returned `id` (`quick:<service>`).
 
 ### Remote tunnel
 
@@ -102,7 +102,7 @@ stopAll(): Promise<void>
 
 ## TunnelStore
 
-Optional JSON-file persistence (`<dataDir>/config.json`). No dependency on `TunnelKit`.
+Optional JSON-file persistence (`<dataDir>/config.json`, written with `0600` permissions since it can hold tokens). No dependency on `TunnelKit`.
 
 ```ts
 new TunnelStore(options?: { dataDir?: string; logger?: Logger })
@@ -206,12 +206,12 @@ Types: `Logger`, `TunnelType`, `IngressInfo`, `ActiveTunnel`, `ProgressStage`, `
 
 ```ts
 {
-  id: string;            // "quick:<port>" or your supplied id
+  id: string;            // "quick:<service>" or your supplied id
   type: 'quick' | 'remote' | 'local';
-  port: number;          // local port for quick; 0 otherwise
+  service?: string;      // resolved local service for quick (e.g. http://localhost:3000); absent otherwise
   publicUrl: string;     // TryCloudflare URL or https://<first-hostname>
   startedAt: string;     // ISO timestamp
-  autoStopMinutes: number;
+  autoStopMinutes?: number;  // quick only; absent/0 means no auto-stop
   label?: string;
   ingress?: IngressInfo[];
 }

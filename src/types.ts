@@ -9,17 +9,17 @@ export interface IngressInfo {
 
 /** A tunnel currently being managed by a {@link TunnelKit}. */
 export interface ActiveTunnel {
-	/** Stable identifier: `quick:<port>` for quick tunnels, or the caller-supplied id. */
+	/** Stable identifier: `quick:<service>` for quick tunnels, or the caller-supplied id. */
 	id: string;
 	type: TunnelType;
-	/** Local port for quick tunnels; `0` for remote/local (ingress-driven). */
-	port: number;
+	/** Resolved local service for quick tunnels (e.g. `http://localhost:3000`); absent for remote/local (ingress-driven). */
+	service?: string;
 	/** Best-effort public URL (TryCloudflare URL, or `https://<first-hostname>`). */
 	publicUrl: string;
 	/** ISO timestamp of when the tunnel started. */
 	startedAt: string;
-	/** Minutes until auto-stop (quick tunnels only); `0` means no auto-stop. */
-	autoStopMinutes: number;
+	/** Minutes until auto-stop (quick tunnels only); absent or `0` means no auto-stop. */
+	autoStopMinutes?: number;
 	/** Friendly label/name for remote/local tunnels. */
 	label?: string;
 	/** Ingress rules for remote/local tunnels. */

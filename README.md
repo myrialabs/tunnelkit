@@ -1,8 +1,8 @@
 # tunnelkit
 
-Zero-dependency, TypeScript-native toolkit for running **Cloudflare Tunnels** from Node or Bun.
+Run **Cloudflare Tunnels** from Node or Bun — a clean, event-driven, fully-typed API and CLI over all three tunnel modes, with **zero dependencies**.
 
-It wraps the `cloudflared` binary and gives you a clean, event-driven, fully-typed API over all three tunnel modes — plus binary management and optional persistence — so you can expose a local service to the internet in a few lines.
+It wraps the `cloudflared` binary, manages it for you, and lets you expose a local service to the internet in a few lines.
 
 ```ts
 import { TunnelKit } from 'tunnelkit';
@@ -10,7 +10,7 @@ import { TunnelKit } from 'tunnelkit';
 const tk = new TunnelKit();
 if (!tk.isBinaryInstalled()) await tk.installBinary();
 
-const { publicUrl } = await tk.startQuick({ port: 3000 });
+const { publicUrl } = await tk.startQuick({ service: 3000 }); // a bare port → http://localhost:3000
 console.log(publicUrl); // https://random-words.trycloudflare.com
 ```
 
@@ -24,11 +24,11 @@ tunnelkit quick 3000    # → https://random-words.trycloudflare.com
 ## Why tunnelkit
 
 - **All three tunnel modes**, first-class: Quick, Remote (token), and Local (named).
-- **Zero npm dependencies** — pure Node built-ins. Runs identically on **Node 18+** and **Bun**.
 - **Fully typed**, including events. `TunnelKit` and `CloudflaredTunnel` are typed `EventEmitter`s.
 - **Manages the binary** — download `cloudflared` on demand, or reuse one already on `PATH`.
-- **Optional persistence** (`TunnelStore`) when you want it; stateless core when you don't.
+- **Stateless core**, optional persistence (`TunnelStore`) when you want it. The CLI persists by default so you can reuse named tunnels.
 - **Ships a CLI** — the same capabilities from your terminal via `tunnelkit <command>`.
+- **Zero npm dependencies** — pure Node built-ins. Runs identically on **Node 18+** and **Bun**.
 
 ## Feature matrix
 
@@ -69,9 +69,11 @@ You also need the `cloudflared` binary. tunnelkit can download it (`installBinar
 
 A random `*.trycloudflare.com` URL. No account, no config — great for demos and webhooks.
 
+`service` is where traffic is proxied: a bare port is shorthand for `http://localhost:<port>`, or pass a full URL (`http://localhost:8080`, `https://192.168.1.5:8443`).
+
 ```ts
-const { publicUrl } = await tk.startQuick({ port: 8080, autoStopMinutes: 30 });
-await tk.stopQuick(8080);
+const { publicUrl } = await tk.startQuick({ service: 8080, autoStopMinutes: 30 });
+await tk.stopQuick(8080); // by port, the full service URL, or the returned id
 ```
 
 ### Remote (token-based) tunnel
@@ -115,18 +117,20 @@ await tk.startLocal({
 Installing globally puts a `tunnelkit` command on your `PATH` that drives the same three modes — no code required.
 
 ```sh
-tunnelkit quick 3000                                  # quick TryCloudflare tunnel
-tunnelkit quick 8080 --auto-stop 30                   # auto-stop after 30 min
-tunnelkit remote --token "$CF_TUNNEL_TOKEN"           # token-based tunnel
+tunnelkit quick 3000                                  # quick tunnel (3000 → localhost:3000)
+tunnelkit quick http://localhost:8080 --auto-stop 30  # full URL + auto-stop after 30 min
+tunnelkit remote --token "$CF_TUNNEL_TOKEN" --label prod  # token-based tunnel, saved as "prod"
+tunnelkit remote prod                                 # reuse the saved "prod" token
 tunnelkit login                                       # authenticate (named tunnels)
 tunnelkit local my-app --route app.example.com=http://localhost:3000
+tunnelkit local my-app                                # rerun the saved "my-app" tunnel
 tunnelkit list                                        # named tunnels on your account
 tunnelkit install                                     # download cloudflared
 tunnelkit status                                      # binary status
 tunnelkit help
 ```
 
-Run commands like `quick`, `remote`, and `local` stay in the foreground and shut the tunnel down cleanly on `Ctrl+C`. The binary is downloaded automatically on first use if it isn't already available. See [`docs/cli.md`](./docs/cli.md) for every command and flag.
+Run commands like `quick`, `remote`, and `local` stay in the foreground and shut the tunnel down cleanly on `Ctrl+C`. The binary is downloaded automatically on first use if it isn't already available. The CLI remembers named tunnels by default (under `~/.tunnelkit`) so you can reuse them; pass `--no-save` to opt out. See [`docs/cli.md`](./docs/cli.md) for every command and flag.
 
 ## Events
 
@@ -152,11 +156,11 @@ store.getRemotes();             // [{ id, label, token }]
 store.addLocalIngress(id, 'app.example.com', 'http://localhost:3000');
 ```
 
-Bring your own storage instead (a DB, env vars, …) — the two are fully decoupled.
+Bring your own storage instead (a DB, env vars, …) — the two are fully decoupled. The `tunnelkit` CLI wires `TunnelStore` up for you by default (so `tunnelkit remote prod` and `tunnelkit local my-app` can reuse saved config); pass `--no-save` to skip it.
 
 ## Binary management
 
-Everything ultimately shells out to `cloudflared`. tunnelkit resolves it from the managed `installDir` (default `~/.tunnelkit/bin`), then from `PATH`. It never downloads automatically — you decide when.
+Everything ultimately shells out to `cloudflared`. tunnelkit resolves it from the managed `installDir` (default `~/.tunnelkit/bin`), then from `PATH`. The library never downloads on its own — you call `installBinary()` when you want it. (The CLI does download automatically on first use, since it's interactive.)
 
 ```ts
 tk.getBinaryStatus();           // { installed, version, path }
@@ -200,9 +204,8 @@ tunnelkit doesn't replace the `cloudflared` binary — it *drives* it, replacing
 | Typed events end-to-end | partial | ✅ |
 | Dependencies | has runtime deps | **zero** |
 | Runtime | Node | Node 18+ **and** Bun |
-| Install cloudflared as a system service | ✅ | ❌ (out of scope) |
 
-In short: for a one-off URL from the terminal use the CLI; for installing cloudflared as a daemon use the npm package; for **building an app that creates, runs, monitors, and persists tunnels across all three modes**, use tunnelkit. (Capabilities described reflect the projects as of writing.)
+In short: for **building an app that creates, runs, monitors, and persists tunnels across all three modes**, use tunnelkit. (Capabilities described reflect the projects as of writing.)
 
 ## Low-level API
 

@@ -14,8 +14,8 @@ describe('parseCliArgs', () => {
 	});
 
 	it('parses --key=value', () => {
-		const parsed = parseCliArgs(['--url=http://localhost:3000']);
-		expect(firstValue(parsed, 'url')).toBe('http://localhost:3000');
+		const parsed = parseCliArgs(['--service=http://localhost:3000']);
+		expect(firstValue(parsed, 'service')).toBe('http://localhost:3000');
 	});
 
 	it('collects repeated flags into an array', () => {

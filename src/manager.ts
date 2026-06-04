@@ -78,7 +78,7 @@ interface BaseInstance {
 interface QuickInstance extends BaseInstance {
 	type: 'quick';
 	publicUrl: string;
-	localPort: number;
+	service: string;
 	autoStopMinutes: number;
 	autoStopTimer?: ReturnType<typeof setTimeout>;
 }
@@ -100,6 +100,24 @@ interface LocalInstance extends BaseInstance {
 function isTunnelNameConflict(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error);
 	return /tunnel with name already exists/i.test(message);
+}
+
+/**
+ * Resolve a quick-tunnel target into a service URL. A bare port number
+ * (`3000` or `"3000"`) is shorthand for `http://localhost:3000`; anything else
+ * is treated as a full service URL and passed through unchanged.
+ */
+export function resolveQuickService(service: string | number): string {
+	const raw = typeof service === 'number' ? String(service) : service.trim();
+	if (/^\d+$/.test(raw)) {
+		const port = Number(raw);
+		if (!Number.isInteger(port) || port < 1 || port > 65535) {
+			throw new Error(`Invalid port "${raw}". Expected a number between 1 and 65535, or a full service URL.`);
+		}
+		return `http://localhost:${port}`;
+	}
+	if (!raw) throw new Error('A quick tunnel requires a port or service URL.');
+	return raw;
 }
 
 /** Strongly-typed event map for {@link TunnelKit}. */
@@ -129,7 +147,7 @@ export class TunnelKit extends EventEmitter {
 	private readonly certPath: string;
 	private readonly defaultCloudflaredCert = join(homedir(), '.cloudflared', 'cert.pem');
 
-	private quickTunnels = new Map<number, QuickInstance>();
+	private quickTunnels = new Map<string, QuickInstance>();
 	private remoteTunnels = new Map<string, RemoteInstance>();
 	private localTunnels = new Map<string, LocalInstance>();
 	private loginHandle: LoginHandle | null = null;
@@ -219,28 +237,28 @@ export class TunnelKit extends EventEmitter {
 	// --- Quick tunnel ---
 
 	async startQuick(
-		opts: { port: number; url?: string; autoStopMinutes?: number },
+		opts: { service: string | number; autoStopMinutes?: number },
 		onProgress?: ProgressCallback
-	): Promise<{ id: string; publicUrl: string; timings: Record<string, number> }> {
-		const { port } = opts;
-		const autoStopMinutes = opts.autoStopMinutes ?? 60;
+	): Promise<{ id: string; service: string; publicUrl: string; timings: Record<string, number> }> {
+		const service = resolveQuickService(opts.service);
+		const autoStopMinutes = opts.autoStopMinutes ?? 0;
 		onProgress?.('checking-binary');
 		const binaryPath = this.requireBinary(onProgress);
 		const timings: Record<string, number> = {};
 
-		const existing = this.quickTunnels.get(port);
+		const existing = this.quickTunnels.get(service);
 		if (existing) {
-			return { id: `quick:${port}`, publicUrl: existing.publicUrl, timings };
+			return { id: `quick:${service}`, service, publicUrl: existing.publicUrl, timings };
 		}
 
-		onProgress?.('starting-tunnel', { port });
+		onProgress?.('starting-tunnel', { service });
 		const startTime = Date.now();
 
-		const tunnel = CloudflaredTunnel.quick(opts.url ?? `http://localhost:${port}`, binaryPath);
-		tunnel.on('error', (error) => this.log.error(`[quick:${port}] error:`, error));
+		const tunnel = CloudflaredTunnel.quick(service, binaryPath);
+		tunnel.on('error', (error) => this.log.error(`[quick:${service}] error:`, error));
 		tunnel.on('exit', (code) => {
-			this.log.log(`[quick:${port}] exit code ${code}`);
-			this.quickTunnels.delete(port);
+			this.log.log(`[quick:${service}] exit code ${code}`);
+			this.quickTunnels.delete(service);
 			this.emitStatus();
 		});
 
@@ -248,8 +266,8 @@ export class TunnelKit extends EventEmitter {
 
 		const publicUrl = await this.waitForStart<string>(tunnel, {
 			timeoutMs: this.quickTimeoutMs,
-			timeoutMessage: `Tunnel connection timeout (${this.quickTimeoutMs}ms). Is port ${port} reachable?`,
-			failMessage: `Tunnel failed to start on port ${port}.`,
+			timeoutMessage: `Tunnel connection timeout (${this.quickTimeoutMs}ms). Is ${service} reachable?`,
+			failMessage: `Tunnel failed to start for ${service}.`,
 			// The first non-API trycloudflare URL is the public hostname.
 			attach: (succeed) => tunnel.on('url', (url) => {
 				if (!url.includes('api.trycloudflare.com')) succeed(url);
@@ -261,40 +279,43 @@ export class TunnelKit extends EventEmitter {
 		let autoStopTimer: ReturnType<typeof setTimeout> | undefined;
 		if (autoStopMinutes > 0) {
 			autoStopTimer = setTimeout(() => {
-				this.log.log(`Auto-stopping quick tunnel on port ${port}`);
-				void this.stopQuick(port);
+				this.log.log(`Auto-stopping quick tunnel for ${service}`);
+				void this.stopQuick(service);
 			}, autoStopMinutes * 60 * 1000);
 		}
 
-		this.quickTunnels.set(port, {
+		this.quickTunnels.set(service, {
 			tunnel,
 			publicUrl,
-			localPort: port,
+			service,
 			type: 'quick',
 			startedAt: new Date(),
 			autoStopMinutes,
 			autoStopTimer
 		});
 
-		this.log.log(`Quick tunnel started on port ${port}: ${publicUrl}`);
+		this.log.log(`Quick tunnel started for ${service}: ${publicUrl}`);
 		onProgress?.('connected', { publicUrl, timings });
 		this.emitStatus();
 
-		return { id: `quick:${port}`, publicUrl, timings };
+		return { id: `quick:${service}`, service, publicUrl, timings };
 	}
 
-	async stopQuick(port: number): Promise<void> {
-		const instance = this.quickTunnels.get(port);
+	async stopQuick(service: string | number): Promise<void> {
+		const key = resolveQuickService(
+			typeof service === 'string' && service.startsWith('quick:') ? service.slice('quick:'.length) : service
+		);
+		const instance = this.quickTunnels.get(key);
 		if (!instance) return;
 
 		if (instance.autoStopTimer) clearTimeout(instance.autoStopTimer);
 		try {
 			instance.tunnel.stop();
 		} catch (err) {
-			this.log.warn(`Failed to stop quick tunnel on port ${port}:`, err);
+			this.log.warn(`Failed to stop quick tunnel for ${key}:`, err);
 		}
-		this.quickTunnels.delete(port);
-		this.log.log(`Quick tunnel stopped on port ${port}`);
+		this.quickTunnels.delete(key);
+		this.log.log(`Quick tunnel stopped for ${key}`);
 		this.emitStatus();
 	}
 
@@ -660,11 +681,11 @@ export class TunnelKit extends EventEmitter {
 	list(): ActiveTunnel[] {
 		const tunnels: ActiveTunnel[] = [];
 
-		for (const [port, instance] of this.quickTunnels) {
+		for (const [service, instance] of this.quickTunnels) {
 			tunnels.push({
-				id: `quick:${port}`,
+				id: `quick:${service}`,
 				type: 'quick',
-				port,
+				service,
 				publicUrl: instance.publicUrl,
 				startedAt: instance.startedAt.toISOString(),
 				autoStopMinutes: instance.autoStopMinutes
@@ -676,10 +697,8 @@ export class TunnelKit extends EventEmitter {
 			tunnels.push({
 				id: instance.id,
 				type: instance.type,
-				port: 0,
 				publicUrl: firstHostname ? `https://${firstHostname}` : '',
 				startedAt: instance.startedAt.toISOString(),
-				autoStopMinutes: 0,
 				label: instance.type === 'remote' ? instance.label : instance.name,
 				ingress: instance.ingress
 			});
@@ -692,7 +711,7 @@ export class TunnelKit extends EventEmitter {
 	async stopAll(): Promise<void> {
 		this.log.log('Stopping all tunnels...');
 		const ops: Promise<void>[] = [];
-		for (const port of this.quickTunnels.keys()) ops.push(this.stopQuick(port));
+		for (const service of this.quickTunnels.keys()) ops.push(this.stopQuick(service));
 		for (const id of this.remoteTunnels.keys()) ops.push(this.stopRemote(id));
 		for (const id of this.localTunnels.keys()) ops.push(this.stopLocal(id));
 		await Promise.all(ops);
