@@ -1,6 +1,6 @@
 {
   "name": "tunnelkit",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Run Cloudflare Tunnels (Quick, Remote, Local) from Node or Bun — a typed API and CLI, with zero dependencies.",
   "type": "module",
   "exports": {
