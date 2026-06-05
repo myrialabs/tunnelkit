@@ -4,7 +4,7 @@
  */
 
 // High-level orchestration — start here.
-export { TunnelKit } from './manager.js';
+export { TunnelKit, CLOUDFLARE_TUNNELS_DASHBOARD_URL } from './manager.js';
 export type { TunnelKitOptions, TunnelKitEvents, LocalTunnelConfig } from './manager.js';
 
 // JSON-file persistence for tunnel configuration (used by the CLI by default).

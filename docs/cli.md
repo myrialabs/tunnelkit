@@ -33,6 +33,7 @@ account. Quick needs no account, and remote runs from a token.
   - [`local delete`](#local-delete)
 - [General](#general)
   - [`saved` / `forget`](#saved--forget)
+  - [`dashboard`](#dashboard)
   - [`install`](#install)
   - [`status`](#status)
   - [`version` / `help`](#version--help)
@@ -259,6 +260,24 @@ tunnelkit forget prod      # remove the saved "prod" entry
 `forget` only removes the saved config. To also delete a named tunnel from
 Cloudflare, use [`local delete`](#local-delete). Use `--no-save` on any run to
 skip the store entirely.
+
+### `dashboard`
+
+Print a shortcut link to the Cloudflare Zero Trust **Tunnels** dashboard. The
+`?to=/:account/…` form lets Cloudflare resolve the signed-in account, so it goes
+straight to your tunnels without an account id — handy for creating or
+configuring the remote (dashboard-managed) tunnels you run with
+[`remote run`](#remote-run).
+
+```sh
+tunnelkit dashboard
+```
+
+```
+  Cloudflare Tunnels dashboard:
+
+    https://dash.cloudflare.com/?to=/:account/tunnels
+```
 
 ### `install`
 

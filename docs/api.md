@@ -232,7 +232,15 @@ installBinary(options?: InstallBinaryOptions): Promise<string>
 ```ts
 which(binary: string): string | null   // cross-runtime PATH lookup
 noopLogger: Required<Logger>
+
+CLOUDFLARE_TUNNELS_DASHBOARD_URL: string   // 'https://dash.cloudflare.com/?to=/:account/tunnels'
 ```
+
+`CLOUDFLARE_TUNNELS_DASHBOARD_URL` is a shortcut link to the Cloudflare Zero
+Trust **Tunnels** dashboard. The `?to=/:account/…` form lets Cloudflare resolve
+the signed-in account itself, so it links straight to the tunnels page without
+needing an account id — useful for sending users to create or configure the
+remote (dashboard-managed) tunnels you run with `tk.remote`.
 
 Types: `Logger`, `TunnelType`, `IngressInfo`, `ActiveTunnel`, `ProgressStage`, `ProgressCallback`, `TunnelKitOptions`, `TunnelKitEvents`, `LocalTunnelConfig`, `TunnelStoreOptions`, `RemoteTunnelEntry`, `LocalTunnelEntry`, `CloudflaredTunnelEvents`, `ConnectionInfo`, `LoginHandle`, `LoginCallbacks`, `LoginOptions`, `CreateTunnelOptions`, `CreateTunnelResult`, `DeleteTunnelOptions`, `DeleteTunnelResult`, `RouteDnsOptions`, `RouteDnsResult`, `ListTunnelsOptions`, `TunnelListEntry`, `InstallBinaryOptions`, `BinaryStatus`.
 

@@ -154,6 +154,7 @@ tunnelkit local login                                 # authenticate (named tunn
 tunnelkit local run my-app --route app.example.com=http://localhost:3000
 tunnelkit local run my-app                            # rerun the saved "my-app" tunnel
 tunnelkit local list                                  # named tunnels on your account
+tunnelkit dashboard                                   # shortcut link to the Cloudflare Tunnels dashboard
 tunnelkit install                                     # download cloudflared
 tunnelkit status                                      # binary status
 tunnelkit help

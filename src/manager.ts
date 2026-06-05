@@ -50,6 +50,13 @@ import { LocalTunnels, type LocalTunnelConfig } from './modes/local.js';
 export { resolveQuickService };
 export type { LocalTunnelConfig };
 
+/**
+ * Shortcut to the Cloudflare Zero Trust dashboard's Tunnels page. The
+ * `?to=/:account/…` form lets Cloudflare resolve the signed-in account itself,
+ * so it links straight to your tunnels without needing an account id.
+ */
+export const CLOUDFLARE_TUNNELS_DASHBOARD_URL = 'https://dash.cloudflare.com/?to=/:account/tunnels';
+
 export interface TunnelKitOptions {
 	/** Directory for cert.pem, tunnel credentials, and generated configs. Default: `~/.tunnelkit`. */
 	dataDir?: string;

@@ -41,7 +41,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 
-import { TunnelKit, resolveQuickService } from './manager.js';
+import { TunnelKit, resolveQuickService, CLOUDFLARE_TUNNELS_DASHBOARD_URL } from './manager.js';
 import { TunnelStore } from './store.js';
 import { CloudflaredMissingError } from './tunnel.js';
 import type { Logger } from './logger.js';
@@ -503,6 +503,13 @@ function cmdStatus(parsed: ParsedArgs): void {
 	out(c.dim(`  ${status.path}`));
 }
 
+/** Print a shortcut link to the Cloudflare dashboard's Tunnels page. */
+function cmdDashboard(): void {
+	out('\n  Cloudflare Tunnels dashboard:\n');
+	out(`    ${c.cyan(CLOUDFLARE_TUNNELS_DASHBOARD_URL)}\n`);
+	out(c.dim('  Opens the signed-in account’s Tunnels page (manage remote & named tunnels).\n'));
+}
+
 // --- In-session "add a tunnel" flow ---
 //
 // Reached from the session panel via `n`. The panel is suspended (cooked mode)
@@ -658,6 +665,7 @@ ${c.bold('LOCAL')} ${c.dim('— named tunnel (needs a Cloudflare account)')}
 ${c.bold('GENERAL')}
   saved                        List tunnels saved locally for reuse (remote + local)
   forget <name>                Remove a saved tunnel (leaves Cloudflare untouched)
+  dashboard                    Print a shortcut link to the Cloudflare Tunnels dashboard
   install [version]            Download the cloudflared binary (default: latest)
   status                       Show the cloudflared binary status
   version                      Print the tunnelkit version
@@ -711,7 +719,8 @@ const COMMANDS: Record<string, Handler> = {
 	saved: cmdSaved,
 	forget: cmdForget,
 	install: cmdInstall,
-	status: cmdStatus
+	status: cmdStatus,
+	dashboard: cmdDashboard
 };
 
 /** Mode namespaces: `tunnelkit <namespace> <verb> …`. */
