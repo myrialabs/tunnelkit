@@ -8,7 +8,7 @@
  * context and wires the three facades together — see `manager.ts`.
  */
 
-import type { CloudflaredTunnel } from '../tunnel.js';
+import type { CloudflaredTunnel, ConnectionInfo } from '../tunnel.js';
 import type { Logger } from '../logger.js';
 import type { TunnelStore } from '../store.js';
 import type { IngressInfo, ProgressCallback } from '../types.js';
@@ -39,6 +39,8 @@ export interface ManagerContext {
 	emitStatus(): void;
 	/** Emit a remote `ingress-update` event. */
 	emitIngress(id: string, ingress: IngressInfo[]): void;
+	/** Emit a `connection` up/down event as edge connections come and go. */
+	emitConnection(id: string, info: ConnectionInfo, status: 'up' | 'down'): void;
 	/** Create `dataDir` if it does not yet exist. */
 	ensureDataDir(): void;
 }
@@ -48,23 +50,46 @@ export interface WaitForStartOptions<T> {
 	timeoutMessage: string;
 	failMessage: string;
 	attach: (succeed: (value: T) => void) => void;
+	/** Abort the start early (stops the process and rejects with an `AbortError`). */
+	signal?: AbortSignal;
+}
+
+/** Rejection reason when a start is aborted via its `AbortSignal`. */
+export class AbortError extends Error {
+	constructor() {
+		super('Aborted');
+		this.name = 'AbortError';
+	}
 }
 
 /**
  * Await a tunnel reaching its "started" state. Resolves with the value passed
- * to `succeed` (e.g. the public URL), or rejects on timeout, process error, or
- * a non-zero early exit — stopping the process in every failure path.
+ * to `succeed` (e.g. the public URL), or rejects on timeout, process error, a
+ * non-zero early exit, or an abort signal — stopping the process in every
+ * failure path.
  */
 export function waitForStart<T>(tunnel: CloudflaredTunnel, opts: WaitForStartOptions<T>): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
 		let settled = false;
 
+		const onAbort = (): void => finish(() => {
+			tunnel.stop();
+			reject(new AbortError());
+		});
+
 		const finish = (action: () => void): void => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			opts.signal?.removeEventListener('abort', onAbort);
 			action();
 		};
+
+		if (opts.signal?.aborted) {
+			onAbort();
+			return;
+		}
+		opts.signal?.addEventListener('abort', onAbort, { once: true });
 
 		const timer = setTimeout(() => finish(() => {
 			tunnel.stop();

@@ -21,6 +21,7 @@ it's always clear which mode an operation is for — for example authentication 
 `tunnelkit local login`, because only named (local) tunnels touch your Cloudflare
 account. Quick needs no account, and remote runs from a token.
 
+- [Interactive mode](#interactive-mode)
 - [Quick](#quick)
   - [`quick`](#quick-1)
 - [Remote](#remote)
@@ -40,13 +41,70 @@ account. Quick needs no account, and remote runs from a token.
 
 ---
 
+## Interactive mode
+
+Run `tunnelkit` with **no command** in a terminal to open a **live control
+panel** — a persistent view of every tunnel you're running, where you can start
+more and stop them individually. Outside a terminal (piped, CI), the bare
+command prints help instead, so scripts are unaffected.
+
+```sh
+tunnelkit            # control panel (in a TTY)
+```
+
+The panel lists each running tunnel with its status, public URL / ingress, live
+edge connections (and their locations), and uptime — all updating in place:
+
+```
+tunnelkit · 2 tunnels active   up 04:12
+
+❯ ● quick  http://localhost:3000  https://aaa.trycloudflare.com   2 conns SIN,LAX
+  ● remote prod                   https://app.example.com         1 conn SIN
+
+  ↑/↓ select · n new · x stop · c copy URL · q quit
+```
+
+| Key | Action |
+| --- | --- |
+| `↑`/`↓` (or `j`/`k`) | Move the selection |
+| `n` | Start another tunnel (Quick / Remote / Local / a saved one) — added alongside the others |
+| `x` | Stop the selected tunnel (the rest keep running) |
+| `c` | Copy the selected tunnel's public URL |
+| `q` / `Ctrl+C` | Stop **all** tunnels and exit |
+
+Pressing `n` opens a short wizard (mode → prompts for port / token / routes); the
+panel pauses while you answer, then resumes with the new tunnel in the list. With
+**no** tunnels running yet, the panel skips straight to this wizard. `Esc` always
+steps back one level (prompt → menu → panel) and never exits — quitting is always
+an explicit `q`, which stops every tunnel. The panel runs on the alternate screen,
+so on exit your terminal is exactly as you left it.
+
+Starting a tunnel by command drops you straight into the panel, so you can add
+more from there:
+
+```sh
+tunnelkit quick 3000          # starts the tunnel, then opens the panel
+```
+
+Interactivity is layered on top of the regular commands — it never replaces them:
+
+- **Missing arguments are prompted for** when attached to a terminal; with no TTY
+  they error as before, so scripted usage stays strict.
+- **Destructive actions ask first.** `local delete` confirms before removing a
+  tunnel. Pass [`--yes`](#global-options) (or run without a TTY) to skip the prompt.
+- **No TTY, no takeover.** Run commands fall back to a static summary plus "Press
+  Ctrl+C to stop", so pipes and CI logs stay clean.
+
+---
+
 ## Quick
 
 ### `quick`
 
 Start a quick [TryCloudflare](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/)
-tunnel to a local service and print the public URL. Runs in the foreground until
-`Ctrl+C`.
+tunnel to a local service and print the public URL. In a terminal it then opens
+the [control panel](#interactive-mode), where you can add more tunnels or stop
+this one; otherwise it runs in the foreground until `Ctrl+C`.
 
 ```sh
 tunnelkit quick <port|url> [--auto-stop <minutes>]
@@ -223,8 +281,11 @@ tunnelkit status
 
 ```sh
 tunnelkit version   # or -v
-tunnelkit help      # or -h, or no command
+tunnelkit help      # or -h
 ```
+
+With no command, `tunnelkit` opens the [control panel](#interactive-mode) in a
+terminal, or prints help when output is not a TTY.
 
 ---
 
@@ -234,6 +295,7 @@ These apply to every command.
 
 | Option | Description |
 | --- | --- |
+| `--yes`, `-y` | Skip confirmation prompts (e.g. `local delete`). Confirmations are also skipped automatically without a TTY. |
 | `--no-save` | Don't read or write the saved-config store (`<dataDir>/config.json`) for this run. Applies to `remote run` and `local run`. |
 | `--data-dir <dir>` | Override the data directory (`cert.pem`, credentials, configs, saved store). Default `~/.tunnelkit`. |
 | `--install-dir <dir>` | Override the managed binary directory. Default `~/.tunnelkit/bin`. |
@@ -250,5 +312,6 @@ argument.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success (or a foreground tunnel was stopped with `Ctrl+C`). |
+| `0` | Success (or a foreground tunnel was stopped with `Ctrl+C` / `q`). |
 | `1` | An error occurred — invalid arguments, a missing binary, or a failed Cloudflare operation. Details are printed to stderr. |
+| `130` | An interactive prompt or menu was cancelled (`Esc` / `Ctrl+C`). |

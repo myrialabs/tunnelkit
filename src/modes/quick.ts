@@ -43,10 +43,11 @@ export class QuickTunnels {
 	constructor(private readonly ctx: ManagerContext) {}
 
 	async start(
-		opts: { service: string | number; autoStopMinutes?: number },
+		opts: { service: string | number; autoStopMinutes?: number; signal?: AbortSignal },
 		onProgress?: ProgressCallback
 	): Promise<{ id: string; service: string; publicUrl: string; timings: Record<string, number> }> {
 		const service = resolveQuickService(opts.service);
+		const id = `quick:${service}`;
 		const autoStopMinutes = opts.autoStopMinutes ?? 0;
 		onProgress?.('checking-binary');
 		const binaryPath = this.ctx.requireBinary(onProgress);
@@ -54,13 +55,15 @@ export class QuickTunnels {
 
 		const existing = this.tunnels.get(service);
 		if (existing) {
-			return { id: `quick:${service}`, service, publicUrl: existing.publicUrl, timings };
+			return { id, service, publicUrl: existing.publicUrl, timings };
 		}
 
 		onProgress?.('starting-tunnel', { service });
 		const startTime = Date.now();
 
 		const tunnel = CloudflaredTunnel.quick(service, binaryPath);
+		tunnel.on('connected', (info) => this.ctx.emitConnection(id, info, 'up'));
+		tunnel.on('disconnected', (info) => this.ctx.emitConnection(id, info, 'down'));
 		tunnel.on('error', (error) => this.ctx.log.error(`[quick:${service}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[quick:${service}] exit code ${code}`);
@@ -74,6 +77,7 @@ export class QuickTunnels {
 			timeoutMs: this.ctx.quickTimeoutMs,
 			timeoutMessage: `Tunnel connection timeout (${this.ctx.quickTimeoutMs}ms). Is ${service} reachable?`,
 			failMessage: `Tunnel failed to start for ${service}.`,
+			signal: opts.signal,
 			// The first non-API trycloudflare URL is the public hostname.
 			attach: (succeed) => tunnel.on('url', (url) => {
 				if (!url.includes('api.trycloudflare.com')) succeed(url);
@@ -103,7 +107,7 @@ export class QuickTunnels {
 		onProgress?.('connected', { publicUrl, timings });
 		this.ctx.emitStatus();
 
-		return { id: `quick:${service}`, service, publicUrl, timings };
+		return { id, service, publicUrl, timings };
 	}
 
 	async stop(service: string | number): Promise<void> {

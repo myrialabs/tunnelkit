@@ -246,7 +246,8 @@ export class LocalTunnels {
 
 	async start(
 		config: LocalTunnelConfig,
-		onProgress?: ProgressCallback
+		onProgress?: ProgressCallback,
+		opts?: { signal?: AbortSignal }
 	): Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }> {
 		onProgress?.('checking-binary');
 		const binaryPath = this.ctx.requireBinary(onProgress);
@@ -267,6 +268,8 @@ export class LocalTunnels {
 		const startTime = Date.now();
 
 		const tunnel = CloudflaredTunnel.withConfig(configPath, binaryPath);
+		tunnel.on('connected', (info) => this.ctx.emitConnection(config.id, info, 'up'));
+		tunnel.on('disconnected', (info) => this.ctx.emitConnection(config.id, info, 'down'));
 		tunnel.on('error', (error) => this.ctx.log.error(`[local:${config.name}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[local:${config.name}] exit code ${code}`);
@@ -280,6 +283,7 @@ export class LocalTunnels {
 			timeoutMs: this.ctx.connectTimeoutMs,
 			timeoutMessage: `Local tunnel connection timeout (${this.ctx.connectTimeoutMs}ms). Check config and credentials.`,
 			failMessage: `Local tunnel "${config.name}" failed to start.`,
+			signal: opts?.signal,
 			attach: (succeed) => tunnel.once('connected', () => succeed())
 		});
 

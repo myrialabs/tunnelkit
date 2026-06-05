@@ -22,13 +22,14 @@
  * Emits:
  * - 'status-changed' (tunnels: ActiveTunnel[])      whenever a tunnel starts/stops
  * - 'ingress-update' ({ id, ingress })              when a remote tunnel's ingress syncs
+ * - 'connection'     ({ id, info, status })         as edge connections come up / go down
  */
 
 import { EventEmitter } from 'events';
 import { existsSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { CloudflaredMissingError } from './tunnel.js';
+import { CloudflaredMissingError, type ConnectionInfo } from './tunnel.js';
 import {
 	resolveCloudflaredBinary,
 	defaultInstallDir,
@@ -82,6 +83,7 @@ export interface TunnelKitOptions {
 export interface TunnelKitEvents {
 	'status-changed': [tunnels: ActiveTunnel[]];
 	'ingress-update': [data: { id: string; ingress: IngressInfo[] }];
+	'connection': [data: { id: string; info: ConnectionInfo; status: 'up' | 'down' }];
 }
 
 // Declaration merging: type the inherited EventEmitter methods.
@@ -141,6 +143,7 @@ export class TunnelKit extends EventEmitter {
 			requireBinary: (onProgress) => this.requireBinary(onProgress),
 			emitStatus: () => this.emitStatus(),
 			emitIngress: (id, ingress) => void this.emit('ingress-update', { id, ingress }),
+			emitConnection: (id, info, status) => void this.emit('connection', { id, info, status }),
 			ensureDataDir: () => this.ensureDataDir()
 		};
 
@@ -199,6 +202,15 @@ export class TunnelKit extends EventEmitter {
 	/** Snapshot of every tunnel currently managed, across all three modes. */
 	list(): ActiveTunnel[] {
 		return [...this.quick.snapshot(), ...this.remote.snapshot(), ...this.local.snapshot()];
+	}
+
+	/** Stop a single managed tunnel by id, routing to its owning mode. No-op if unknown. */
+	async stop(id: string): Promise<void> {
+		const tunnel = this.list().find((t) => t.id === id);
+		if (!tunnel) return;
+		if (tunnel.type === 'quick') await this.quick.stop(id);
+		else if (tunnel.type === 'remote') await this.remote.stop(id);
+		else await this.local.stop(id);
 	}
 
 	/** Stop every managed tunnel. */

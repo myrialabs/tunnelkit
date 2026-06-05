@@ -26,7 +26,7 @@ export class RemoteTunnels {
 	constructor(private readonly ctx: ManagerContext) {}
 
 	async start(
-		opts: { id: string; token: string; label?: string },
+		opts: { id: string; token: string; label?: string; signal?: AbortSignal },
 		onProgress?: ProgressCallback
 	): Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }> {
 		const label = opts.label ?? opts.id;
@@ -61,6 +61,8 @@ export class RemoteTunnels {
 				this.ctx.emitIngress(opts.id, instance.ingress);
 			}
 		});
+		tunnel.on('connected', (info) => this.ctx.emitConnection(opts.id, info, 'up'));
+		tunnel.on('disconnected', (info) => this.ctx.emitConnection(opts.id, info, 'down'));
 		tunnel.on('error', (error) => this.ctx.log.error(`[remote:${label}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[remote:${label}] exit code ${code}`);
@@ -74,6 +76,7 @@ export class RemoteTunnels {
 			timeoutMs: this.ctx.connectTimeoutMs,
 			timeoutMessage: `Remote tunnel connection timeout (${this.ctx.connectTimeoutMs}ms). Check the token.`,
 			failMessage: 'Remote tunnel failed to start. Verify the token.',
+			signal: opts.signal,
 			attach: (succeed) => tunnel.once('connected', () => succeed())
 		});
 

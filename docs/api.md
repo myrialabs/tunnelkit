@@ -5,7 +5,7 @@ This page documents the programmatic API. For the terminal command, see the
 
 All exports come from the package root: `import { … } from 'tunnelkit'`.
 
-- [`TunnelKit`](#tunnelmanager)
+- [`TunnelKit`](#tunnelkit)
 - [`TunnelStore`](#tunnelstore)
 - [`CloudflaredTunnel`](#cloudflaredtunnel)
 - [Binary functions](#binary-functions)
@@ -128,6 +128,7 @@ To list every named tunnel on your Cloudflare account (not just the running ones
 | --- | --- |
 | `status-changed` | `(tunnels: ActiveTunnel[])` |
 | `ingress-update` | `({ id: string; ingress: IngressInfo[] })` |
+| `connection` | `({ id: string; info: ConnectionInfo; status: 'up' \| 'down' })` — an edge connection came up or went down |
 
 ---
 
