@@ -57,20 +57,29 @@ The panel lists each running tunnel with its status, public URL / ingress, live
 edge connections (and their locations), and uptime — all updating in place:
 
 ```
-tunnelkit · 2 tunnels active   up 04:12
+tunnelkit · 3 tunnels active   up 04:12
 
 ❯ ● quick  http://localhost:3000  https://aaa.trycloudflare.com   2 conns SIN,LAX
-  ● remote prod                   https://app.example.com         1 conn SIN
+  ● remote prod                   3 routes                        1 conn SIN
+      app.example.com    →  http://localhost:3000
+      api.example.com    →  http://localhost:8080
+      admin.example.com  →  http://localhost:9000
+  ● local  my-app                  2 routes                        4 conns SIN,LAX,FRA,IAD
+      shop.example.com   →  http://localhost:4000
+      cms.example.com    →  http://localhost:4001
 
   ↑/↓ select · n new · x stop · c copy URL · q quit
 ```
+
+When a remote/local tunnel serves a single hostname the header shows its URL;
+with several it shows a route count and lists each `hostname → service` below.
 
 | Key | Action |
 | --- | --- |
 | `↑`/`↓` (or `j`/`k`) | Move the selection |
 | `n` | Start another tunnel (Quick / Remote / Local / a saved one) — added alongside the others |
 | `x` | Stop the selected tunnel (the rest keep running) |
-| `c` | Copy the selected tunnel's public URL |
+| `c` | Copy the selected tunnel's URL (when it serves several hostnames, pick which one to copy) |
 | `q` / `Ctrl+C` | Stop **all** tunnels and exit |
 
 Pressing `n` opens a short wizard (mode → prompts for port / token / routes); the

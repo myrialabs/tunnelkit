@@ -21,6 +21,7 @@
 import { spawn } from 'node:child_process';
 import type { TunnelKit } from './manager.js';
 import type { ConnectionInfo } from './tunnel.js';
+import type { ActiveTunnel, IngressInfo } from './types.js';
 
 // --- Colour (TTY-aware, honours NO_COLOR) ---
 
@@ -595,14 +596,26 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 				const dot = stopping && active ? c.yellow('●') : healthy ? c.green('●') : c.dim('○');
 				const name = (t.label ?? t.service ?? t.id).padEnd(nameWidth);
 				const label = active ? c.bold(name) : name;
-				const url = t.publicUrl
-					? c.cyan(t.publicUrl)
-					: c.dim(t.type === 'quick' ? '…' : 'waiting for ingress…');
+				// Routes a remote/local tunnel actually serves (skip the catch-all rule).
+				const routes = (t.ingress ?? []).filter((r): r is IngressInfo & { hostname: string } => !!r.hostname);
 				const locs = conns.map((conn) => conn.location);
 				const connStr = conns.length > 0
 					? c.dim(`  ${conns.length} conn${conns.length === 1 ? '' : 's'}${locs.length ? ` ${locs.join(',')}` : ''}`)
 					: '';
-				lines.push(`${active ? c.cyan('❯') : ' '} ${dot} ${c.dim(t.type.padEnd(6))} ${label}  ${url}${connStr}`);
+				// Header: a single URL when there's one route; a route count when there
+				// are many (each one is then listed below, so don't repeat it here).
+				const head = routes.length > 1
+					? c.dim(`${routes.length} routes`)
+					: t.publicUrl
+						? c.cyan(t.publicUrl)
+						: c.dim(t.type === 'quick' ? '…' : 'waiting for ingress…');
+				lines.push(`${active ? c.cyan('❯') : ' '} ${dot} ${c.dim(t.type.padEnd(6))} ${label}  ${head}${connStr}`);
+				// List every hostname → service mapping in an aligned column so all the
+				// dashboard- or config-defined services are visible at a glance.
+				if (routes.length > 1) {
+					const hostWidth = Math.max(...routes.map((r) => r.hostname.length));
+					for (const r of routes) lines.push(c.dim(`      ${r.hostname.padEnd(hostWidth)}  →  ${r.service}`));
+				}
 			});
 		}
 
@@ -675,6 +688,31 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		}
 	};
 
+	// Copy a tunnel's URL to the clipboard. A tunnel can serve many hostnames, so
+	// when there's more than one route, suspend the panel and let the user pick
+	// which URL to copy; a single-route (or quick) tunnel copies straight away.
+	const copyUrl = async (t: ActiveTunnel): Promise<void> => {
+		const routes = (t.ingress ?? []).filter((r): r is IngressInfo & { hostname: string } => !!r.hostname);
+		if (routes.length <= 1) {
+			if (t.publicUrl && copyToClipboard(t.publicUrl)) setFlash('copied URL to clipboard');
+			render();
+			return;
+		}
+
+		suspend();
+		let picked: string | undefined;
+		try {
+			picked = await select(
+				'Copy which URL?',
+				routes.map((r) => ({ label: `https://${r.hostname}`, value: `https://${r.hostname}`, hint: r.service }))
+			);
+		} catch {
+			// Esc / q / Ctrl+C — cancel the copy and just return to the panel.
+		}
+		if (picked && copyToClipboard(picked)) setFlash(`copied ${picked}`);
+		resume();
+	};
+
 	const leave = (): void => {
 		if (ticker) clearInterval(ticker);
 		dispose();
@@ -716,8 +754,7 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 			return;
 		}
 		if (key.type === 'char' && key.value === 'c') {
-			if (current?.publicUrl && copyToClipboard(current.publicUrl)) setFlash('copied URL to clipboard');
-			render();
+			if (current) void copyUrl(current);
 			return;
 		}
 		const next = navigate(cursor, tunnels.length, key);
