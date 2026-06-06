@@ -63,7 +63,7 @@ Each mode lives under its own namespace (`tk.quick`, `tk.remote`, `tk.local`).
 | Local tunnel (named) | `tk.local.login` / `tk.local.create` / `tk.local.routeDns` / `tk.local.start` / `tk.local.stop` / `tk.local.delete` |
 | Account tunnel list | `tk.local.list` |
 | Auto-stop (quick) | `tk.quick.start({ autoStopMinutes })` |
-| Live status / ingress | `'status-changed'` / `'ingress-update'` events, `tk.list()` |
+| Live status / ingress / connections | `'status-changed'` / `'ingress-update'` / `'connection'` events; `tk.list()` carries live `connections` per tunnel |
 | Binary install / status | `installBinary` / `isBinaryInstalled` / `getBinaryStatus` |
 | Config persistence | `TunnelStore` (on by default, API & CLI) |
 | Low-level process control | `CloudflaredTunnel` |
@@ -86,8 +86,8 @@ You also need the `cloudflared` binary. tunnelkit can download it (`installBinar
 
 A random `*.trycloudflare.com` URL — no account, no config. Great for demos and webhooks.
 
-`service` is the proxy target: a bare port is shorthand for `http://localhost:<port>`, or pass a
-full URL (`http://localhost:8080`, `https://192.168.1.5:8443`).
+`service` is the proxy target: a bare port (`3000`) is shorthand for `http://localhost:3000`, or pass
+a full URL (`http://localhost:8080`, `https://192.168.1.5:8443`).
 
 ```ts
 const { publicUrl } = await tk.quick.start({ service: 8080, autoStopMinutes: 30 });
@@ -96,9 +96,8 @@ await tk.quick.stop(8080); // by port, the full service URL, or the returned id
 
 ### Remote (token-based) tunnel
 
-A tunnel created and configured in the Cloudflare dashboard, run locally from its token. Ingress is
-managed in the dashboard and pushed to cloudflared at runtime — surfaced via the resolved promise and
-the `ingress-update` event.
+A tunnel created in the Cloudflare dashboard, run locally from its token. Ingress rules are pushed
+by Cloudflare at runtime and surfaced via the resolved promise and the `ingress-update` event.
 
 ```ts
 const { ingress } = await tk.remote.start({ id: 'my-app', token: process.env.CF_TUNNEL_TOKEN! });
@@ -108,26 +107,24 @@ await tk.remote.stop('my-app');
 
 ### Local (named) tunnel
 
-A named tunnel you create and control from your machine: authenticate once, create, route DNS, then
-run with ingress rules.
+A named tunnel you fully control: authenticate once, create, route DNS, then run with ingress rules
+you define.
 
 ```ts
-// 1. Authenticate (once) — surface the URL; the user approves in the browser.
+// 1. Authenticate once — surface the URL; the user approves in the browser.
 await new Promise<void>((resolve, reject) => {
   tk.local.login({ onUrl: (url) => console.log('Authorize:', url), onComplete: resolve, onError: reject });
 });
 
-// 2. Create the tunnel (named "acme-prod") and route a hostname to it.
+// 2. Create the tunnel and route a hostname.
 const { tunnelId, credentialsFile } = await tk.local.create('acme-prod');
 await tk.local.routeDns('acme-prod', 'app.example.com');
 
-// 3. Run it. Note the two identifiers are distinct:
-//    - `name` is the Cloudflare tunnel name (created above).
-//    - `id`   is *your* handle in TunnelKit's registry — you pass it to
-//             tk.local.stop()/isActive(), so make it whatever your app keys on.
+// 3. Run it.
+//    `id` is your handle in TunnelKit's registry; `name` is the Cloudflare tunnel name.
 await tk.local.start({
-  id: 'storefront',          // your app's identifier
-  name: 'acme-prod',         // the Cloudflare tunnel name
+  id: 'storefront',
+  name: 'acme-prod',
   tunnelId,
   credentialsFile,
   ingress: [{ hostname: 'app.example.com', service: 'http://localhost:3000' }]
@@ -137,8 +134,8 @@ await tk.local.start({
 ```
 
 `tk.local.create` includes orphan recovery: if a same-named tunnel exists on Cloudflare but isn't
-known locally and has no active connections, it's deleted and the create retried. Guard tunnels you
-track with the `isTunnelKnown` option.
+tracked locally and has no active connections, it is deleted and the create is retried. Guard tunnels
+you track with the `isTunnelKnown` option.
 
 ## CLI
 
@@ -148,46 +145,43 @@ Installing globally puts a `tunnelkit` command on your `PATH` that drives the sa
 tunnelkit                                             # interactive control panel (in a terminal)
 tunnelkit quick 3000                                  # quick tunnel (3000 → localhost:3000)
 tunnelkit quick http://localhost:8080 --auto-stop 30  # full URL + auto-stop after 30 min
-tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --label prod  # token-based tunnel, saved as "prod"
+tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --label prod
 tunnelkit remote run prod                             # reuse the saved "prod" token
 tunnelkit local login                                 # authenticate (named tunnels)
 tunnelkit local run my-app --route app.example.com=http://localhost:3000
 tunnelkit local run my-app                            # rerun the saved "my-app" tunnel
-tunnelkit local list                                  # named tunnels on your account
-tunnelkit dashboard                                   # shortcut link to the Cloudflare Tunnels dashboard
-tunnelkit install                                     # download cloudflared
-tunnelkit status                                      # binary status
-tunnelkit help
+tunnelkit local list
+tunnelkit dashboard                                   # Cloudflare Tunnels dashboard link
+tunnelkit install && tunnelkit status
 ```
 
-Run `tunnelkit` with no command in a terminal for a **live control panel** — start several tunnels at
-once and manage them together (`n` new, `↑/↓` select, `x` stop, `c` copy URL, `q` quit). Missing
-arguments are prompted for. Piped or in CI it stays non-interactive, so scripts behave predictably.
-
-Named tunnels are remembered by default (under `~/.tunnelkit`) so you can reuse them; pass `--no-save`
-to opt out. See the [CLI reference](./docs/cli.md) for every command and flag.
+Run `tunnelkit` with no command in a terminal for a **live control panel** — manage several tunnels
+at once (`n` new, `↑/↓` select, `x` stop, `c` copy URL, `q` quit). See the
+[CLI reference](./docs/cli.md) for every command and flag.
 
 ## Events
 
 A `TunnelKit` instance is a typed `EventEmitter` with three high-level events:
 
 ```ts
-tk.on('status-changed', (tunnels) => console.log('Active:', tunnels));           // any tunnel starts/stops
+tk.on('status-changed', (tunnels) => console.log('Active:', tunnels));           // a tunnel starts/stops, or its connections change
 tk.on('ingress-update', ({ id, ingress }) => console.log(id, ingress));          // a remote tunnel's ingress syncs
 tk.on('connection', ({ id, info, status }) => console.log(id, status, info.location)); // an edge connection up/down
 ```
 
-The low-level [`CloudflaredTunnel`](#low-level-api) — wrapping a single `cloudflared` child process —
-is its own typed `EventEmitter`, emitting `url`, `connected`, `disconnected`, `config`, `error`,
-`exit`, `stdout`, and `stderr`. Reach for it only when you want to drive a process directly.
+Each `ActiveTunnel` in `tk.list()` carries live `connections: ConnectionInfo[]`; `status-changed`
+fires on every change, so watching it alone is enough for a health view. The `connection` event
+gives per-edge detail (ip / location) as it happens.
+
+The low-level [`CloudflaredTunnel`](#low-level-api) emits `url`, `connected`, `disconnected`,
+`config`, `error`, `exit`, `stdout`, and `stderr`. Reach for it only when you want to drive a
+process directly.
 
 ## Persistence
 
-**Remote and local tunnels you start are saved by default** — through both the API and the CLI — so
-you can restore them later. (Quick tunnels are ephemeral and never saved.) It's backed by
-`TunnelStore`: a small JSON store (`<dataDir>/config.json`, written `0600` since it can hold tokens).
-
-It's a plain on/off switch — location follows `dataDir`:
+Remote and local tunnels you start are saved by default — through both the API and the CLI — so
+you can restore them later. (Quick tunnels are ephemeral and never saved.) The store is a small JSON
+file (`<dataDir>/config.json`, written `0600`).
 
 ```ts
 new TunnelKit();                                  // auto-save under dataDir (default)
@@ -202,8 +196,7 @@ const tk = new TunnelKit();
 for (const r of tk.store?.getRemotes() ?? []) await tk.remote.start(r);
 ```
 
-`TunnelStore` has no dependency on `TunnelKit`, so you can share one instance across components or use
-it standalone:
+`TunnelStore` has no dependency on `TunnelKit`, so you can also use it standalone:
 
 ```ts
 import { TunnelStore } from 'tunnelkit';
@@ -217,8 +210,7 @@ store.addLocalIngress(id, 'app.example.com', 'http://localhost:3000');
 
 Everything shells out to `cloudflared`. tunnelkit resolves it from the managed `installDir` (default
 `~/.tunnelkit/bin`), then from `PATH`. The library never downloads on its own — you call
-`installBinary()` when you want it. (The CLI does download automatically on first use, since it's
-interactive.)
+`installBinary()` when you want it. (The CLI downloads automatically on first use.)
 
 ```ts
 tk.getBinaryStatus();                  // { installed, version, path }
@@ -232,14 +224,9 @@ If no binary can be resolved, operations throw `CloudflaredMissingError`.
 
 ```ts
 new TunnelKit({
-  // Location — just two directories:
   dataDir,          // ALL persisted state: cert.pem, credentials, configs, saved tunnels (default: ~/.tunnelkit)
-  installDir,       // ONLY the cloudflared binary, in its own dir (default: ~/.tunnelkit/bin)
-
-  // Persistence (saved inside dataDir):
+  installDir,       // ONLY the cloudflared binary (default: ~/.tunnelkit/bin)
   store,            // true / omit = auto-save; false = disable; (advanced) a TunnelStore instance
-
-  // Behaviour:
   logger,           // any { log, warn, error } — silent if omitted (try `console`)
   quickTimeoutMs,   // quick-tunnel URL timeout (default: 30000)
   connectTimeoutMs, // remote/local connection timeout (default: 60000)
@@ -247,17 +234,17 @@ new TunnelKit({
 });
 ```
 
-There's just one place to set a location: **`dataDir`**. It holds everything tunnelkit persists —
-`cert.pem` (from `login()`, migrated from `~/.cloudflared` if found), per-tunnel
-`<tunnelId>/credentials.json` + `config.yml`, and the saved-tunnels store (`config.json`). `installDir`
-is separate only so a shared `cloudflared` binary can live outside your app's data.
+`dataDir` is the one place to set a location — it holds `cert.pem`, per-tunnel credentials and
+configs, and the saved-tunnels store. `installDir` is separate only so a shared binary can live
+outside your app's data.
 
 ## How is this different from `cloudflared`?
 
 tunnelkit doesn't replace the `cloudflared` binary — it *drives* it, replacing the wrapper layer.
 
-**vs. the `cloudflared` CLI:** you could shell out and parse logs yourself; tunnelkit removes that glue
-— typed API, URL/connection promises, timeouts, auto-stop, a multi-tunnel registry, and live events.
+**vs. the `cloudflared` CLI:** you could shell out and parse logs yourself; tunnelkit removes that
+glue — typed API, URL/connection promises, timeouts, auto-stop, a multi-tunnel registry, and live
+events.
 
 **vs. the [`cloudflared` npm package](https://www.npmjs.com/package/cloudflared):**
 
@@ -273,8 +260,8 @@ tunnelkit doesn't replace the `cloudflared` binary — it *drives* it, replacing
 | Dependencies | has runtime deps | **zero** |
 | Runtime | Node | Node 18+ **and** Bun |
 
-For **building an app that creates, runs, monitors, and persists tunnels across all three modes**, use
-tunnelkit. (Capabilities reflect the projects as of writing.)
+For **building an app that creates, runs, monitors, and persists tunnels across all three modes**,
+use tunnelkit. (Capabilities reflect the projects as of writing.)
 
 ## Low-level API
 
@@ -304,9 +291,9 @@ process.on('SIGTERM', shutdown);
 
 ## Examples
 
-A dozen runnable, case-by-case scenarios live in [`examples/`](./examples/README.md) — webhooks,
-multiple tunnels, multi-hostname routing, account cleanup, restore-on-startup, binary management,
-error handling, custom loggers, and more.
+A dozen runnable scenarios live in [`examples/`](./examples/README.md) — webhooks, multiple tunnels,
+multi-hostname routing, account cleanup, restore-on-startup, binary management, error handling,
+and more.
 
 ```sh
 bun run examples/quick.ts 3000
@@ -316,7 +303,7 @@ bun run examples/quick.ts 3000
 
 - [API reference](./docs/api.md) — every export, option, method, and event.
 - [CLI reference](./docs/cli.md) — every command, option, and example.
-- [Examples](./examples/README.md) — case-by-case runnable scenarios.
+- [Examples](./examples/README.md) — runnable scenarios.
 
 ## Support
 

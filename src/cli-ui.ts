@@ -20,7 +20,6 @@
 
 import { spawn } from 'node:child_process';
 import type { TunnelKit } from './manager.js';
-import type { ConnectionInfo } from './tunnel.js';
 import type { ActiveTunnel, IngressInfo } from './types.js';
 
 // --- Colour (TTY-aware, honours NO_COLOR) ---
@@ -555,8 +554,6 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	process.stdout.write(ENTER_ALT + CURSOR_HIDE);
 
 	const startedAt = Date.now();
-	// Per-tunnel edge connections: tunnelId → (connectionId → info).
-	const connections = new Map<string, Map<string, ConnectionInfo>>();
 	let cursor = 0;
 	// Starts suspended: nothing is drawn until begin() decides (panel or add flow).
 	let suspended = true;
@@ -566,7 +563,6 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	let dispose: () => void = () => {};
 	let ticker: ReturnType<typeof setInterval> | undefined;
 
-	const connsOf = (id: string): ConnectionInfo[] => [...(connections.get(id)?.values() ?? [])];
 	const setFlash = (msg: string): void => {
 		flashMsg = msg;
 		flashUntil = Date.now() + 2500;
@@ -591,7 +587,7 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		} else {
 			tunnels.forEach((t, i) => {
 				const active = i === cursor;
-				const conns = connsOf(t.id);
+				const conns = t.connections;
 				const healthy = conns.length > 0;
 				const dot = stopping && active ? c.yellow('●') : healthy ? c.green('●') : c.dim('○');
 				const name = (t.label ?? t.service ?? t.id).padEnd(nameWidth);
@@ -634,25 +630,11 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		process.stdout.write(CURSOR_HIDE + CURSOR_HOME + CLEAR_DOWN + lines.join('\n') + '\n');
 	};
 
-	const onConnection = (data: { id: string; info: ConnectionInfo; status: 'up' | 'down' }): void => {
-		let map = connections.get(data.id);
-		if (!map) {
-			map = new Map();
-			connections.set(data.id, map);
-		}
-		if (data.status === 'up') map.set(data.info.id, data.info);
-		else map.delete(data.info.id);
-		render();
-	};
-	const onStatus = (): void => {
-		// Drop connection state for tunnels that are no longer running.
-		const live = new Set(tk.list().map((t) => t.id));
-		for (const id of connections.keys()) if (!live.has(id)) connections.delete(id);
-		render();
-	};
+	// `status-changed` fires on connection up/down too (each ActiveTunnel carries
+	// its live `connections`), so a single render handler keeps the panel current.
+	const onStatus = (): void => render();
 	const onIngress = (): void => render();
 
-	tk.on('connection', onConnection);
 	tk.on('status-changed', onStatus);
 	tk.on('ingress-update', onIngress);
 
@@ -716,7 +698,6 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	const leave = (): void => {
 		if (ticker) clearInterval(ticker);
 		dispose();
-		tk.off('connection', onConnection);
 		tk.off('status-changed', onStatus);
 		tk.off('ingress-update', onIngress);
 		// Back to the normal screen — scrollback is exactly as the user left it.

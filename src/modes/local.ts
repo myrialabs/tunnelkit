@@ -17,7 +17,7 @@ import {
 	type TunnelListEntry
 } from '../tunnel.js';
 import type { ActiveTunnel, IngressInfo, ProgressCallback } from '../types.js';
-import { waitForStart, type ManagerContext } from './shared.js';
+import { waitForStart, ConnectionTracker, type ManagerContext } from './shared.js';
 
 export interface LocalTunnelConfig {
 	id: string;
@@ -33,6 +33,7 @@ interface LocalInstance {
 	id: string;
 	name: string;
 	ingress: IngressInfo[];
+	connections: ConnectionTracker;
 }
 
 function isTunnelNameConflict(error: unknown): boolean {
@@ -268,8 +269,15 @@ export class LocalTunnels {
 		const startTime = Date.now();
 
 		const tunnel = CloudflaredTunnel.withConfig(configPath, binaryPath);
-		tunnel.on('connected', (info) => this.ctx.emitConnection(config.id, info, 'up'));
-		tunnel.on('disconnected', (info) => this.ctx.emitConnection(config.id, info, 'down'));
+		const connections = new ConnectionTracker();
+		tunnel.on('connected', (info) => {
+			connections.apply(info, 'up');
+			this.ctx.emitConnection(config.id, info, 'up');
+		});
+		tunnel.on('disconnected', (info) => {
+			connections.apply(info, 'down');
+			this.ctx.emitConnection(config.id, info, 'down');
+		});
 		tunnel.on('error', (error) => this.ctx.log.error(`[local:${config.name}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[local:${config.name}] exit code ${code}`);
@@ -294,7 +302,8 @@ export class LocalTunnels {
 			id: config.id,
 			name: config.name,
 			startedAt: new Date(),
-			ingress: config.ingress.map((r) => ({ hostname: r.hostname, service: r.service }))
+			ingress: config.ingress.map((r) => ({ hostname: r.hostname, service: r.service })),
+			connections
 		});
 		this.ctx.store?.upsertLocal({
 			id: config.id,
@@ -340,7 +349,8 @@ export class LocalTunnels {
 				publicUrl: firstHostname ? `https://${firstHostname}` : '',
 				startedAt: instance.startedAt.toISOString(),
 				label: instance.name,
-				ingress: instance.ingress
+				ingress: instance.ingress,
+				connections: instance.connections.list()
 			});
 		}
 		return tunnels;

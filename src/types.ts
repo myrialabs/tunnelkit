@@ -1,3 +1,5 @@
+import type { ConnectionInfo } from './tunnel.js';
+
 /** The three kinds of Cloudflare Tunnel tunnelkit can run. */
 export type TunnelType = 'quick' | 'remote' | 'local';
 
@@ -24,6 +26,12 @@ export interface ActiveTunnel {
 	label?: string;
 	/** Ingress rules for remote/local tunnels. */
 	ingress?: IngressInfo[];
+	/**
+	 * Live edge connections cloudflared currently holds to Cloudflare. Empty until
+	 * the tunnel is publicly reachable; a non-empty list means it is actually
+	 * serving traffic. Use `.length` for a quick "is it up / how healthy" check.
+	 */
+	connections: ConnectionInfo[];
 }
 
 /** Progress stages emitted during a tunnel start, for UI feedback. */

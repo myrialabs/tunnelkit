@@ -10,7 +10,7 @@
 
 import { CloudflaredTunnel } from '../tunnel.js';
 import type { ActiveTunnel, IngressInfo, ProgressCallback } from '../types.js';
-import { waitForStart, type ManagerContext } from './shared.js';
+import { waitForStart, ConnectionTracker, type ManagerContext } from './shared.js';
 
 interface RemoteInstance {
 	tunnel: CloudflaredTunnel;
@@ -18,6 +18,7 @@ interface RemoteInstance {
 	id: string;
 	label: string;
 	ingress: IngressInfo[];
+	connections: ConnectionTracker;
 }
 
 export class RemoteTunnels {
@@ -48,7 +49,8 @@ export class RemoteTunnels {
 			id: opts.id,
 			label,
 			startedAt: new Date(),
-			ingress: []
+			ingress: [],
+			connections: new ConnectionTracker()
 		};
 
 		tunnel.on('config', (data) => {
@@ -61,8 +63,14 @@ export class RemoteTunnels {
 				this.ctx.emitIngress(opts.id, instance.ingress);
 			}
 		});
-		tunnel.on('connected', (info) => this.ctx.emitConnection(opts.id, info, 'up'));
-		tunnel.on('disconnected', (info) => this.ctx.emitConnection(opts.id, info, 'down'));
+		tunnel.on('connected', (info) => {
+			instance.connections.apply(info, 'up');
+			this.ctx.emitConnection(opts.id, info, 'up');
+		});
+		tunnel.on('disconnected', (info) => {
+			instance.connections.apply(info, 'down');
+			this.ctx.emitConnection(opts.id, info, 'down');
+		});
 		tunnel.on('error', (error) => this.ctx.log.error(`[remote:${label}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[remote:${label}] exit code ${code}`);
@@ -125,7 +133,8 @@ export class RemoteTunnels {
 				publicUrl: firstHostname ? `https://${firstHostname}` : '',
 				startedAt: instance.startedAt.toISOString(),
 				label: instance.label,
-				ingress: instance.ingress
+				ingress: instance.ingress,
+				connections: instance.connections.list()
 			});
 		}
 		return tunnels;

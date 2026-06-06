@@ -53,9 +53,11 @@ as a library by host applications, and also ships a thin `tunnelkit` CLI
   cross-cutting concerns (binary, aggregate `list()`/`stopAll()`, store, events),
   and builds the shared `ManagerContext`. The primary public entry point.
 - **`src/modes/`** — one facade per mode, reached via `tk.quick` / `tk.remote` /
-  `tk.local`. `shared.ts` holds `ManagerContext` + `waitForStart`; `quick.ts`,
-  `remote.ts`, `local.ts` each own their registry and lifecycle. All
-  account/auth operations (login, list, delete, route-dns) live in `local.ts`.
+  `tk.local`. `shared.ts` holds `ManagerContext`, `waitForStart`, and
+  `ConnectionTracker` (per-tunnel live edge connections, surfaced as
+  `ActiveTunnel.connections`); `quick.ts`, `remote.ts`, `local.ts` each own their
+  registry and lifecycle. All account/auth operations (login, list, delete,
+  route-dns) live in `local.ts`.
 - **`src/store.ts`** — `TunnelStore`: optional JSON persistence, decoupled from
   `TunnelKit`.
 - **`src/binary.ts`** — binary resolution (managed dir → PATH) and download.

@@ -45,6 +45,27 @@ export interface ManagerContext {
 	ensureDataDir(): void;
 }
 
+/**
+ * Tracks the live edge connections for a single tunnel, keyed by connection id.
+ * cloudflared opens several HA connections once a tunnel goes live, so a
+ * non-empty tracker means the tunnel is actually reachable over the edge. Each
+ * mode keeps one per running tunnel and surfaces it in its `snapshot()`.
+ */
+export class ConnectionTracker {
+	private readonly live = new Map<string, ConnectionInfo>();
+
+	/** Record a connection coming up (`'up'`) or going down (`'down'`). */
+	apply(info: ConnectionInfo, status: 'up' | 'down'): void {
+		if (status === 'up') this.live.set(info.id, info);
+		else this.live.delete(info.id);
+	}
+
+	/** The connections currently live, in insertion order. */
+	list(): ConnectionInfo[] {
+		return [...this.live.values()];
+	}
+}
+
 export interface WaitForStartOptions<T> {
 	timeoutMs: number;
 	timeoutMessage: string;

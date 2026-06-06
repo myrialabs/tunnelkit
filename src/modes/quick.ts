@@ -8,7 +8,7 @@
 
 import { CloudflaredTunnel } from '../tunnel.js';
 import type { ActiveTunnel, ProgressCallback } from '../types.js';
-import { waitForStart, type ManagerContext } from './shared.js';
+import { waitForStart, ConnectionTracker, type ManagerContext } from './shared.js';
 
 /**
  * Resolve a quick-tunnel target into a service URL. A bare port number
@@ -35,6 +35,7 @@ interface QuickInstance {
 	service: string;
 	autoStopMinutes: number;
 	autoStopTimer?: ReturnType<typeof setTimeout>;
+	connections: ConnectionTracker;
 }
 
 export class QuickTunnels {
@@ -62,8 +63,15 @@ export class QuickTunnels {
 		const startTime = Date.now();
 
 		const tunnel = CloudflaredTunnel.quick(service, binaryPath);
-		tunnel.on('connected', (info) => this.ctx.emitConnection(id, info, 'up'));
-		tunnel.on('disconnected', (info) => this.ctx.emitConnection(id, info, 'down'));
+		const connections = new ConnectionTracker();
+		tunnel.on('connected', (info) => {
+			connections.apply(info, 'up');
+			this.ctx.emitConnection(id, info, 'up');
+		});
+		tunnel.on('disconnected', (info) => {
+			connections.apply(info, 'down');
+			this.ctx.emitConnection(id, info, 'down');
+		});
 		tunnel.on('error', (error) => this.ctx.log.error(`[quick:${service}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[quick:${service}] exit code ${code}`);
@@ -100,7 +108,8 @@ export class QuickTunnels {
 			service,
 			startedAt: new Date(),
 			autoStopMinutes,
-			autoStopTimer
+			autoStopTimer,
+			connections
 		});
 
 		this.ctx.log.log(`Quick tunnel started for ${service}: ${publicUrl}`);
@@ -143,7 +152,8 @@ export class QuickTunnels {
 				service,
 				publicUrl: instance.publicUrl,
 				startedAt: instance.startedAt.toISOString(),
-				autoStopMinutes: instance.autoStopMinutes
+				autoStopMinutes: instance.autoStopMinutes,
+				connections: instance.connections.list()
 			});
 		}
 		return tunnels;

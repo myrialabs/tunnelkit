@@ -20,9 +20,14 @@
  * and never saved.
  *
  * Emits:
- * - 'status-changed' (tunnels: ActiveTunnel[])      whenever a tunnel starts/stops
+ * - 'status-changed' (tunnels: ActiveTunnel[])      when a tunnel starts/stops, or its connection count changes
  * - 'ingress-update' ({ id, ingress })              when a remote tunnel's ingress syncs
  * - 'connection'     ({ id, info, status })         as edge connections come up / go down
+ *
+ * Each `ActiveTunnel` from `list()` carries its live `connections`, so listening
+ * to `status-changed` alone is enough to keep a "is it public / how healthy" view
+ * up to date; the finer-grained `connection` event is there if you need per-edge
+ * detail (ip / location) as it happens.
  */
 
 import { EventEmitter } from 'events';
@@ -150,7 +155,13 @@ export class TunnelKit extends EventEmitter {
 			requireBinary: (onProgress) => this.requireBinary(onProgress),
 			emitStatus: () => this.emitStatus(),
 			emitIngress: (id, ingress) => void this.emit('ingress-update', { id, ingress }),
-			emitConnection: (id, info, status) => void this.emit('connection', { id, info, status }),
+			emitConnection: (id, info, status) => {
+				this.emit('connection', { id, info, status });
+				// The owning mode has already updated its connection tracker, so the
+				// fresh count is reflected in list() — re-emit status so consumers that
+				// only watch `status-changed` still see connection changes.
+				this.emitStatus();
+			},
 			ensureDataDir: () => this.ensureDataDir()
 		};
 
