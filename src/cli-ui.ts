@@ -19,7 +19,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import type { TunnelKit } from './manager.js';
+import type { TunnelKit } from './tunnelkit.js';
 import type { ActiveTunnel, IngressInfo } from './types.js';
 
 // --- Colour (TTY-aware, honours NO_COLOR) ---
@@ -573,7 +573,7 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		const tunnels = tk.list();
 		cursor = tunnels.length === 0 ? 0 : Math.min(Math.max(cursor, 0), tunnels.length - 1);
 
-		const nameWidth = Math.max(0, ...tunnels.map((t) => plainLen(t.label ?? t.service ?? t.id)));
+		const nameWidth = Math.max(0, ...tunnels.map((t) => plainLen(t.name ?? t.service ?? t.id)));
 
 		const lines: string[] = [];
 		lines.push(
@@ -590,7 +590,7 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 				const conns = t.connections;
 				const healthy = conns.length > 0;
 				const dot = stopping && active ? c.yellow('●') : healthy ? c.green('●') : c.dim('○');
-				const name = (t.label ?? t.service ?? t.id).padEnd(nameWidth);
+				const name = (t.name ?? t.service ?? t.id).padEnd(nameWidth);
 				const label = active ? c.bold(name) : name;
 				// Routes a remote/local tunnel actually serves (skip the catch-all rule).
 				const routes = (t.ingress ?? []).filter((r): r is IngressInfo & { hostname: string } => !!r.hostname);
@@ -729,7 +729,7 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		const current = tunnels[cursor];
 		if (key.type === 'char' && (key.value === 'x' || key.value === 'd')) {
 			if (current) {
-				setFlash(`stopped ${current.label ?? current.service ?? current.id}`);
+				setFlash(`stopped ${current.name ?? current.service ?? current.id}`);
 				void tk.stop(current.id).then(render);
 			}
 			return;

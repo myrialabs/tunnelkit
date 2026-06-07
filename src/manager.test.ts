@@ -1,8 +1,8 @@
 import { describe, it, expect, afterAll } from 'bun:test';
-import { mkdtempSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { platform, tmpdir } from 'os';
 import { join } from 'path';
-import { TunnelKit, resolveQuickService } from './manager.js';
+import { TunnelKit, resolveQuickService } from './tunnelkit.js';
 import { TunnelStore } from './store.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'tunnelkit-mgr-'));
@@ -29,6 +29,60 @@ describe('TunnelKit store option', () => {
 		const custom = new TunnelStore({ dataDir: dir });
 		const tk = new TunnelKit({ dataDir: '/somewhere/else', store: custom });
 		expect(tk.store).toBe(custom);
+	});
+});
+
+describe('TunnelKit isTunnelKnown default', () => {
+	it('defaults to a store-aware predicate when a store is configured', () => {
+		const dataDir = join(dir, 'known-default');
+		const store = new TunnelStore({ dataDir });
+		store.upsertLocal({ id: 'L1', name: 'one', tunnelId: 'uuid-xyz', credentialsFile: '/tmp/c.json', ingress: [] });
+
+		const tk = new TunnelKit({ dataDir, store });
+		const predicate = (tk as unknown as { isTunnelKnown: (id: string) => boolean }).isTunnelKnown;
+		expect(predicate('uuid-xyz')).toBe(true);
+		expect(predicate('uuid-other')).toBe(false);
+	});
+
+	it('defaults to a constant false when store is disabled', () => {
+		const tk = new TunnelKit({ dataDir: dir, store: false });
+		const predicate = (tk as unknown as { isTunnelKnown: (id: string) => boolean }).isTunnelKnown;
+		expect(predicate('any-id')).toBe(false);
+	});
+
+	it('honors a caller-supplied isTunnelKnown over the default', () => {
+		const dataDir = join(dir, 'known-custom');
+		const store = new TunnelStore({ dataDir });
+		store.upsertLocal({ id: 'L1', name: 'one', tunnelId: 'uuid-xyz', credentialsFile: '/tmp/c.json', ingress: [] });
+
+		const tk = new TunnelKit({
+			dataDir,
+			store,
+			isTunnelKnown: (id) => id === 'manual-match'
+		});
+		const predicate = (tk as unknown as { isTunnelKnown: (id: string) => boolean }).isTunnelKnown;
+		expect(predicate('manual-match')).toBe(true);
+		expect(predicate('uuid-xyz')).toBe(false);
+	});
+});
+
+describe('TunnelKit.ensureBinary', () => {
+	it('returns the managed path without downloading when one already exists', async () => {
+		const dataDir = join(dir, 'ensure-binary-existing');
+		const installDir = join(dataDir, 'bin');
+		const binaryName = platform() === 'win32' ? 'cloudflared.exe' : 'cloudflared';
+		const binaryPath = join(installDir, binaryName);
+		// Drop a fake binary file so resolveCloudflaredBinary finds it before the
+		// PATH fallback. ensureBinary() should not try to install over it.
+		if (!existsSync(installDir)) {
+			mkdirSync(installDir, { recursive: true });
+		}
+		writeFileSync(binaryPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+		const tk = new TunnelKit({ dataDir, installDir });
+		const resolved = await tk.ensureBinary();
+		expect(resolved).toBe(binaryPath);
+		expect(tk.getBinaryStatus().installed).toBe(true);
 	});
 });
 

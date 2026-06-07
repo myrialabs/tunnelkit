@@ -40,13 +40,14 @@ itself.
 | `logger` | `Logger` | silent | `{ log?, warn?, error? }`; pass `console` for output. |
 | `quickTimeoutMs` | `number` | `30000` | Timeout waiting for a quick-tunnel URL. |
 | `connectTimeoutMs` | `number` | `60000` | Timeout waiting for remote/local connection. |
-| `isTunnelKnown` | `(tunnelId: string) => boolean` | `() => false` | Guards named tunnels you track from orphan cleanup during `create`. |
+| `isTunnelKnown` | `(tunnelId: string) => boolean` | `() => false`, or store-aware when a `TunnelStore` is configured | Guards named tunnels you track from orphan cleanup during `create`. |
 | `store` | `boolean \| TunnelStore` | `true` | Persist started tunnels. `true`/omit = auto-save under `dataDir`; `false` = off; a `TunnelStore` = bring your own instance. |
 
 ### Binary methods
 
 | Method | Returns | Description |
 | --- | --- | --- |
+| `ensureBinary()` | `Promise<string>` | Resolve a usable `cloudflared`, downloading the managed copy on first use. Idempotent. |
 | `isBinaryInstalled()` | `boolean` | Whether a managed binary exists in `installDir`. |
 | `getBinaryStatus()` | `BinaryStatus` | `{ installed, version, path }`. |
 | `installBinary(version?)` | `Promise<string>` | Download cloudflared; returns its path. |
@@ -66,7 +67,7 @@ accepts the same port/URL you started with, or the returned `id` (`quick:<servic
 ### Remote tunnel — `tk.remote`
 
 ```ts
-tk.remote.start(opts: { id: string; token: string; label?: string }, onProgress?: ProgressCallback)
+tk.remote.start(opts: { id: string; token: string; name?: string }, onProgress?: ProgressCallback)
   : Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }>
 tk.remote.stop(id: string): Promise<void>
 tk.remote.ingress(id: string): IngressInfo[]
@@ -152,21 +153,21 @@ store.path                         // absolute path to config.json
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `getRemotes()` | `RemoteTunnelEntry[]` | All remote configs. |
-| `getRemote(id)` | `RemoteTunnelEntry \| null` | One remote config. |
-| `addRemote(label, token)` | `RemoteTunnelEntry` | Persist a new remote config (generates `id`). |
-| `upsertRemote(id, label, token)` | `RemoteTunnelEntry` | Insert or update by `id` (used by auto-save). |
+| `getRemotes()` | `RemoteTunnelConfig[]` | All remote configs. |
+| `getRemote(id)` | `RemoteTunnelConfig \| null` | One remote config. |
+| `addRemote(name, token)` | `RemoteTunnelConfig` | Persist a new remote config (generates `id`). |
+| `upsertRemote(id, name, token)` | `RemoteTunnelConfig` | Insert or update by `id` (used by auto-save). |
 | `removeRemote(id)` | `boolean` | Remove; `true` if it existed. |
-| `getLocals()` | `LocalTunnelEntry[]` | All local tunnels. |
-| `getLocal(id)` | `LocalTunnelEntry \| null` | One local tunnel. |
-| `addLocal(name, tunnelId, credentialsFile)` | `LocalTunnelEntry` | Persist a new local tunnel (empty ingress). |
-| `upsertLocal(entry)` | `LocalTunnelEntry` | Insert or replace by `entry.id` (used by auto-save). |
+| `getLocals()` | `LocalTunnelConfig[]` | All local tunnels. |
+| `getLocal(id)` | `LocalTunnelConfig \| null` | One local tunnel. |
+| `addLocal(name, tunnelId, credentialsFile)` | `LocalTunnelConfig` | Persist a new local tunnel (empty ingress). |
+| `upsertLocal(entry)` | `LocalTunnelConfig` | Insert or replace by `entry.id` (used by auto-save). |
 | `removeLocal(id)` | `boolean` | Remove; `true` if it existed. |
-| `addLocalIngress(id, hostname, service)` | `LocalTunnelEntry \| null` | Add or update an ingress rule (matched by hostname). |
-| `removeLocalIngress(id, hostname)` | `LocalTunnelEntry \| null` | Remove an ingress rule. |
+| `addLocalIngress(id, hostname, service)` | `LocalTunnelConfig \| null` | Add or update an ingress rule (matched by hostname). |
+| `removeLocalIngress(id, hostname)` | `LocalTunnelConfig \| null` | Remove an ingress rule. |
 | `getZone()` / `setZone(zone)` / `clearZone()` | `string \| null` / `void` / `void` | Authorized DNS zone. |
 
-`RemoteTunnelEntry`: `{ id, label, token }`. `LocalTunnelEntry`: `{ id, name, tunnelId, credentialsFile, ingress: IngressInfo[] }`.
+`RemoteTunnelConfig`: `{ id, name, token }`. `LocalTunnelConfig`: `{ id, name, tunnelId, credentialsFile, ingress: IngressInfo[] }`.
 
 ---
 
@@ -250,8 +251,8 @@ CLOUDFLARE_TUNNELS_DASHBOARD_URL: string   // 'https://dash.cloudflare.com/?to=/
 `?to=/:account/…` form resolves the signed-in account automatically, so no account id is needed.
 
 Types: `Logger`, `TunnelType`, `IngressInfo`, `ActiveTunnel`, `ProgressStage`, `ProgressCallback`,
-`TunnelKitOptions`, `TunnelKitEvents`, `LocalTunnelConfig`, `TunnelStoreOptions`,
-`RemoteTunnelEntry`, `LocalTunnelEntry`, `CloudflaredTunnelEvents`, `ConnectionInfo`, `LoginHandle`,
+`TunnelKitOptions`, `TunnelKitEvents`, `TunnelStoreOptions`,
+`RemoteTunnelConfig`, `LocalTunnelConfig`, `CloudflaredTunnelEvents`, `ConnectionInfo`, `LoginHandle`,
 `LoginCallbacks`, `LoginOptions`, `CreateTunnelOptions`, `CreateTunnelResult`,
 `DeleteTunnelOptions`, `DeleteTunnelResult`, `RouteDnsOptions`, `RouteDnsResult`,
 `ListTunnelsOptions`, `TunnelListEntry`, `InstallBinaryOptions`, `BinaryStatus`.
@@ -266,7 +267,7 @@ Types: `Logger`, `TunnelType`, `IngressInfo`, `ActiveTunnel`, `ProgressStage`, `
   publicUrl: string;        // TryCloudflare URL or https://<first-hostname>
   startedAt: string;        // ISO timestamp
   autoStopMinutes?: number; // quick only; absent/0 means no auto-stop
-  label?: string;
+  name?: string;            // name for remote/local tunnels
   ingress?: IngressInfo[];
   connections: ConnectionInfo[];  // live HA edge connections; empty while coming up, non-empty once serving
 }

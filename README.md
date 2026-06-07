@@ -30,7 +30,7 @@ internet in a few lines.
 import { TunnelKit } from 'tunnelkit';
 
 const tk = new TunnelKit();
-if (!tk.isBinaryInstalled()) await tk.installBinary();
+await tk.ensureBinary();
 
 const { publicUrl } = await tk.quick.start({ service: 3000 }); // port → http://localhost:3000
 console.log(publicUrl); // https://random-words.trycloudflare.com
@@ -64,7 +64,7 @@ Each mode lives under its own namespace (`tk.quick`, `tk.remote`, `tk.local`).
 | Account tunnel list | `tk.local.list` |
 | Auto-stop (quick) | `tk.quick.start({ autoStopMinutes })` |
 | Live status / ingress / connections | `'status-changed'` / `'ingress-update'` / `'connection'` events; `tk.list()` carries live `connections` per tunnel |
-| Binary install / status | `installBinary` / `isBinaryInstalled` / `getBinaryStatus` |
+| Binary install / status | `ensureBinary` / `installBinary` / `isBinaryInstalled` / `getBinaryStatus` |
 | Config persistence | `TunnelStore` (on by default, API & CLI) |
 | Low-level process control | `CloudflaredTunnel` |
 | Terminal usage | `tunnelkit` CLI ([docs](./docs/cli.md)) |
@@ -145,7 +145,7 @@ Installing globally puts a `tunnelkit` command on your `PATH` that drives the sa
 tunnelkit                                             # interactive control panel (in a terminal)
 tunnelkit quick 3000                                  # quick tunnel (3000 → localhost:3000)
 tunnelkit quick http://localhost:8080 --auto-stop 30  # full URL + auto-stop after 30 min
-tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --label prod
+tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --name prod
 tunnelkit remote run prod                             # reuse the saved "prod" token
 tunnelkit local login                                 # authenticate (named tunnels)
 tunnelkit local run my-app --route app.example.com=http://localhost:3000
@@ -202,7 +202,7 @@ for (const r of tk.store?.getRemotes() ?? []) await tk.remote.start(r);
 import { TunnelStore } from 'tunnelkit';
 
 const store = new TunnelStore({ dataDir: '~/.myapp/tunnels' });
-store.getRemotes();             // [{ id, label, token }]
+store.getRemotes();             // [{ id, name, token }]
 store.addLocalIngress(id, 'app.example.com', 'http://localhost:3000');
 ```
 
@@ -214,6 +214,7 @@ Everything shells out to `cloudflared`. tunnelkit resolves it from the managed `
 
 ```ts
 tk.getBinaryStatus();                  // { installed, version, path }
+await tk.ensureBinary();               // resolve a binary, downloading on first use
 await tk.installBinary();              // download into installDir
 await tk.installBinary('2024.12.2');   // pin a version
 ```

@@ -1,4 +1,4 @@
-import type { ConnectionInfo } from './tunnel.js';
+import type { ConnectionInfo } from './cloudflared-tunnel.js';
 
 /** The three kinds of Cloudflare Tunnel tunnelkit can run. */
 export type TunnelType = 'quick' | 'remote' | 'local';
@@ -7,6 +7,22 @@ export type TunnelType = 'quick' | 'remote' | 'local';
 export interface IngressInfo {
 	hostname?: string;
 	service: string;
+}
+
+/** A persisted remote (token-based) tunnel configuration. */
+export interface RemoteTunnelConfig {
+	id: string;
+	name: string;
+	token: string;
+}
+
+/** A persisted local (named) tunnel configuration. */
+export interface LocalTunnelConfig {
+	id: string;
+	name: string;
+	tunnelId: string;
+	credentialsFile: string;
+	ingress: IngressInfo[];
 }
 
 /** A tunnel currently being managed by a {@link TunnelKit}. */
@@ -22,8 +38,8 @@ export interface ActiveTunnel {
 	startedAt: string;
 	/** Minutes until auto-stop (quick tunnels only); absent or `0` means no auto-stop. */
 	autoStopMinutes?: number;
-	/** Friendly label/name for remote/local tunnels. */
-	label?: string;
+	/** Name for remote/local tunnels. */
+	name?: string;
 	/** Ingress rules for remote/local tunnels. */
 	ingress?: IngressInfo[];
 	/**

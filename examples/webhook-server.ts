@@ -25,7 +25,7 @@ const server = createServer((req, res) => {
 server.listen(port, () => console.log(`Local server listening on http://localhost:${port}`));
 
 const tk = new TunnelKit({ logger: console });
-if (!tk.isBinaryInstalled()) await tk.installBinary();
+await tk.ensureBinary();
 
 // No autoStopMinutes → the tunnel stays up until you stop it.
 const { publicUrl } = await tk.quick.start({ service: port });

@@ -19,15 +19,13 @@ if (!token) {
 
 const tk = new TunnelKit({ logger: console });
 
-if (!tk.isBinaryInstalled()) {
-	await tk.installBinary();
-}
+await tk.ensureBinary();
 
 tk.on('ingress-update', ({ id, ingress }) => {
 	console.log(`[${id}] ingress updated:`, ingress);
 });
 
-const { ingress } = await tk.remote.start({ id: 'prod', token, label: 'prod' });
+const { ingress } = await tk.remote.start({ id: 'prod', token, name: 'prod' });
 console.log('Connected. Ingress:', ingress);
 
 process.on('SIGINT', async () => {

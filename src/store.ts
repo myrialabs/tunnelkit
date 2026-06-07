@@ -17,25 +17,13 @@ import { homedir } from 'os';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { resolveLogger, type Logger } from './logger.js';
-import type { IngressInfo } from './types.js';
+import type { LocalTunnelConfig, RemoteTunnelConfig } from './types.js';
 
-export interface RemoteTunnelEntry {
-	id: string;
-	label: string;
-	token: string;
-}
-
-export interface LocalTunnelEntry {
-	id: string;
-	name: string;
-	tunnelId: string;
-	credentialsFile: string;
-	ingress: IngressInfo[];
-}
+export type { RemoteTunnelConfig, LocalTunnelConfig };
 
 interface StoreFile {
-	remotes: RemoteTunnelEntry[];
-	locals: LocalTunnelEntry[];
+	remotes: RemoteTunnelConfig[];
+	locals: LocalTunnelConfig[];
 	authorizedZone?: string;
 }
 
@@ -92,32 +80,32 @@ export class TunnelStore {
 
 	// --- Remote tunnels ---
 
-	getRemotes(): RemoteTunnelEntry[] {
+	getRemotes(): RemoteTunnelConfig[] {
 		return this.read().remotes;
 	}
 
-	getRemote(id: string): RemoteTunnelEntry | null {
+	getRemote(id: string): RemoteTunnelConfig | null {
 		return this.read().remotes.find((r) => r.id === id) ?? null;
 	}
 
-	addRemote(label: string, token: string): RemoteTunnelEntry {
+	addRemote(name: string, token: string): RemoteTunnelConfig {
 		const data = this.read();
-		const entry: RemoteTunnelEntry = { id: randomUUID(), label, token };
+		const entry: RemoteTunnelConfig = { id: randomUUID(), name, token };
 		data.remotes.push(entry);
 		this.write(data);
-		this.log.log(`Remote tunnel config added: ${label}`);
+		this.log.log(`Remote tunnel config added: ${name}`);
 		return entry;
 	}
 
 	/** Insert or update a remote entry keyed by a caller-supplied `id` (used by auto-save). */
-	upsertRemote(id: string, label: string, token: string): RemoteTunnelEntry {
+	upsertRemote(id: string, name: string, token: string): RemoteTunnelConfig {
 		const data = this.read();
 		const existing = data.remotes.find((r) => r.id === id);
-		const entry: RemoteTunnelEntry = { id, label, token };
+		const entry: RemoteTunnelConfig = { id, name, token };
 		if (existing) Object.assign(existing, entry);
 		else data.remotes.push(entry);
 		this.write(data);
-		this.log.log(`Remote tunnel config saved: ${label}`);
+		this.log.log(`Remote tunnel config saved: ${name}`);
 		return existing ?? entry;
 	}
 
@@ -133,17 +121,17 @@ export class TunnelStore {
 
 	// --- Local tunnels ---
 
-	getLocals(): LocalTunnelEntry[] {
+	getLocals(): LocalTunnelConfig[] {
 		return this.read().locals;
 	}
 
-	getLocal(id: string): LocalTunnelEntry | null {
+	getLocal(id: string): LocalTunnelConfig | null {
 		return this.read().locals.find((l) => l.id === id) ?? null;
 	}
 
-	addLocal(name: string, tunnelId: string, credentialsFile: string): LocalTunnelEntry {
+	addLocal(name: string, tunnelId: string, credentialsFile: string): LocalTunnelConfig {
 		const data = this.read();
-		const entry: LocalTunnelEntry = { id: randomUUID(), name, tunnelId, credentialsFile, ingress: [] };
+		const entry: LocalTunnelConfig = { id: randomUUID(), name, tunnelId, credentialsFile, ingress: [] };
 		data.locals.push(entry);
 		this.write(data);
 		this.log.log(`Local tunnel config added: ${name} (${tunnelId})`);
@@ -151,7 +139,7 @@ export class TunnelStore {
 	}
 
 	/** Insert or replace a local entry keyed by `entry.id` (used by auto-save). */
-	upsertLocal(entry: LocalTunnelEntry): LocalTunnelEntry {
+	upsertLocal(entry: LocalTunnelConfig): LocalTunnelConfig {
 		const data = this.read();
 		const index = data.locals.findIndex((l) => l.id === entry.id);
 		if (index >= 0) data.locals[index] = entry;
@@ -172,7 +160,7 @@ export class TunnelStore {
 	}
 
 	/** Add or update an ingress rule (matched by hostname). Returns the updated entry. */
-	addLocalIngress(id: string, hostname: string, service: string): LocalTunnelEntry | null {
+	addLocalIngress(id: string, hostname: string, service: string): LocalTunnelConfig | null {
 		const data = this.read();
 		const config = data.locals.find((l) => l.id === id);
 		if (!config) return null;
@@ -188,7 +176,7 @@ export class TunnelStore {
 		return config;
 	}
 
-	removeLocalIngress(id: string, hostname: string): LocalTunnelEntry | null {
+	removeLocalIngress(id: string, hostname: string): LocalTunnelConfig | null {
 		const data = this.read();
 		const config = data.locals.find((l) => l.id === id);
 		if (!config) return null;

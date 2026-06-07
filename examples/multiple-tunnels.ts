@@ -13,7 +13,7 @@ const services = process.argv.slice(2).filter(Boolean);
 if (services.length === 0) services.push('3000', '3001');
 
 const tk = new TunnelKit({ logger: console });
-if (!tk.isBinaryInstalled()) await tk.installBinary();
+await tk.ensureBinary();
 
 tk.on('status-changed', (tunnels) => {
 	console.log('\n── active tunnels ──');

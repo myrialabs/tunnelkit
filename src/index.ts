@@ -4,15 +4,15 @@
  */
 
 // High-level orchestration — start here.
-export { TunnelKit, CLOUDFLARE_TUNNELS_DASHBOARD_URL } from './manager.js';
-export type { TunnelKitOptions, TunnelKitEvents, LocalTunnelConfig } from './manager.js';
+export { TunnelKit, CLOUDFLARE_TUNNELS_DASHBOARD_URL } from './tunnelkit.js';
+export type { TunnelKitOptions, TunnelKitEvents } from './tunnelkit.js';
 
 // JSON-file persistence for tunnel configuration (used by the CLI by default).
 export { TunnelStore } from './store.js';
-export type { TunnelStoreOptions, RemoteTunnelEntry, LocalTunnelEntry } from './store.js';
+export type { TunnelStoreOptions } from './store.js';
 
 // Low-level process wrapper and one-shot commands.
-export { CloudflaredTunnel, CloudflaredMissingError } from './tunnel.js';
+export { CloudflaredTunnel, CloudflaredMissingError } from './cloudflared-tunnel.js';
 export type {
 	CloudflaredTunnelEvents,
 	ConnectionInfo,
@@ -27,7 +27,7 @@ export type {
 	RouteDnsResult,
 	ListTunnelsOptions,
 	TunnelListEntry
-} from './tunnel.js';
+} from './cloudflared-tunnel.js';
 
 // Binary management.
 export {
@@ -45,4 +45,12 @@ export type { InstallBinaryOptions, BinaryStatus } from './binary.js';
 export { which } from './which.js';
 export { noopLogger } from './logger.js';
 export type { Logger } from './logger.js';
-export type { TunnelType, IngressInfo, ActiveTunnel, ProgressStage, ProgressCallback } from './types.js';
+export type {
+	TunnelType,
+	IngressInfo,
+	ActiveTunnel,
+	ProgressStage,
+	ProgressCallback,
+	RemoteTunnelConfig,
+	LocalTunnelConfig
+} from './types.js';

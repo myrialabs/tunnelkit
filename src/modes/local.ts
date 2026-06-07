@@ -15,19 +15,11 @@ import {
 	type LoginHandle,
 	type LoginCallbacks,
 	type TunnelListEntry
-} from '../tunnel.js';
-import type { ActiveTunnel, IngressInfo, ProgressCallback } from '../types.js';
-import { waitForStart, ConnectionTracker, type ManagerContext } from './shared.js';
+} from '../cloudflared-tunnel.js';
+import type { ActiveTunnel, IngressInfo, LocalTunnelConfig, ProgressCallback } from '../types.js';
+import { waitForStart, ConnectionTracker, type ManagerContext } from './context.js';
 
-export interface LocalTunnelConfig {
-	id: string;
-	name: string;
-	tunnelId: string;
-	credentialsFile: string;
-	ingress: IngressInfo[];
-}
-
-interface LocalInstance {
+interface LocalTunnelHandle {
 	tunnel: CloudflaredTunnel;
 	startedAt: Date;
 	id: string;
@@ -41,8 +33,8 @@ function isTunnelNameConflict(error: unknown): boolean {
 	return /tunnel with name already exists/i.test(message);
 }
 
-export class LocalTunnels {
-	private readonly tunnels = new Map<string, LocalInstance>();
+export class LocalMode {
+	private readonly tunnels = new Map<string, LocalTunnelHandle>();
 	private loginHandle: LoginHandle | null = null;
 
 	constructor(private readonly ctx: ManagerContext) {}
@@ -321,16 +313,16 @@ export class LocalTunnels {
 	}
 
 	async stop(id: string): Promise<void> {
-		const instance = this.tunnels.get(id);
-		if (!instance) return;
+		const handle = this.tunnels.get(id);
+		if (!handle) return;
 
 		try {
-			instance.tunnel.stop();
+			handle.tunnel.stop();
 		} catch (err) {
-			this.ctx.log.warn(`Failed to stop local tunnel ${instance.name}:`, err);
+			this.ctx.log.warn(`Failed to stop local tunnel ${handle.name}:`, err);
 		}
 		this.tunnels.delete(id);
-		this.ctx.log.log(`Local tunnel stopped: ${instance.name}`);
+		this.ctx.log.log(`Local tunnel stopped: ${handle.name}`);
 		this.ctx.emitStatus();
 	}
 
@@ -341,16 +333,16 @@ export class LocalTunnels {
 	/** Snapshot of this mode's tunnels for the manager's aggregate `list()`. */
 	snapshot(): ActiveTunnel[] {
 		const tunnels: ActiveTunnel[] = [];
-		for (const instance of this.tunnels.values()) {
-			const firstHostname = instance.ingress.find((r) => r.hostname)?.hostname;
+		for (const handle of this.tunnels.values()) {
+			const firstHostname = handle.ingress.find((r) => r.hostname)?.hostname;
 			tunnels.push({
-				id: instance.id,
+				id: handle.id,
 				type: 'local',
 				publicUrl: firstHostname ? `https://${firstHostname}` : '',
-				startedAt: instance.startedAt.toISOString(),
-				label: instance.name,
-				ingress: instance.ingress,
-				connections: instance.connections.list()
+				startedAt: handle.startedAt.toISOString(),
+				name: handle.name,
+				ingress: handle.ingress,
+				connections: handle.connections.list()
 			});
 		}
 		return tunnels;

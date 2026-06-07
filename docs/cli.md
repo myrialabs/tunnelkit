@@ -121,20 +121,20 @@ dashboard and pushed to cloudflared at runtime — hostnames are printed as they
 panel in a terminal; otherwise runs in the foreground until `Ctrl+C`.
 
 ```sh
-tunnelkit remote run [name] [--token <token>] [--label <label>] [--id <id>]
+tunnelkit remote run [name] [--token <token>] [--name <name>] [--id <id>]
 ```
 
 | Option | Default | Description |
 | --- | --- | --- |
 | `[name]` | — | A saved tunnel to reuse; its stored token is loaded automatically. |
 | `--token <token>` | `$CF_TUNNEL_TOKEN` | Tunnel token; falls back to the env var. |
-| `--label <label>` | the name or id | Friendly name. When given with a fresh `--token`, the token is saved under it for reuse. |
+| `--name <name>` | the name or id | Name used to save & reuse the token. |
 | `--id <id>` | `cli-remote` | Stable identifier for the running tunnel. |
 
 Supply the token once, then reuse it by name:
 
 ```sh
-tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --label prod   # first time — saves as "prod"
+tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --name prod   # first time — saves as "prod"
 tunnelkit remote run prod                                       # subsequent runs
 ```
 

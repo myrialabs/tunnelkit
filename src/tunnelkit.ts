@@ -34,7 +34,7 @@ import { EventEmitter } from 'events';
 import { existsSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { CloudflaredMissingError, type ConnectionInfo } from './tunnel.js';
+import { CloudflaredMissingError, type ConnectionInfo } from './cloudflared-tunnel.js';
 import {
 	resolveCloudflaredBinary,
 	defaultInstallDir,
@@ -46,14 +46,13 @@ import {
 import { resolveLogger, type Logger } from './logger.js';
 import { TunnelStore } from './store.js';
 import type { ActiveTunnel, IngressInfo, ProgressCallback } from './types.js';
-import type { ManagerContext } from './modes/shared.js';
-import { QuickTunnels, resolveQuickService } from './modes/quick.js';
-import { RemoteTunnels } from './modes/remote.js';
-import { LocalTunnels, type LocalTunnelConfig } from './modes/local.js';
+import type { ManagerContext } from './modes/context.js';
+import { QuickMode, resolveQuickService } from './modes/quick.js';
+import { RemoteMode } from './modes/remote.js';
+import { LocalMode } from './modes/local.js';
 
-// Re-exported so existing imports (`from 'tunnelkit'` / `./manager.js`) keep working.
+// Re-exported so existing imports (`from 'tunnelkit'` / `./tunnelkit.js`) keep working.
 export { resolveQuickService };
-export type { LocalTunnelConfig };
 
 /**
  * Shortcut to the Cloudflare Zero Trust dashboard's Tunnels page. The
@@ -76,7 +75,11 @@ export interface TunnelKitOptions {
 	/**
 	 * Predicate used during name-conflict recovery: return `true` if the given
 	 * tunnelId is one your app already tracks, so the manager won't treat it as
-	 * an orphan and delete it. Default: always `false`.
+	 * an orphan and delete it.
+	 *
+	 * Default: when a {@link TunnelStore} is configured (the default), `true`
+	 * for any `tunnelId` already present in `store.getLocals()`. With
+	 * `store: false`, the default is `false`.
 	 */
 	isTunnelKnown?: (tunnelId: string) => boolean;
 	/**
@@ -121,11 +124,11 @@ export class TunnelKit extends EventEmitter {
 	private readonly defaultCloudflaredCert = join(homedir(), '.cloudflared', 'cert.pem');
 
 	/** Quick tunnels — `tk.quick.start(...)`, `tk.quick.stop(...)`. */
-	readonly quick: QuickTunnels;
+	readonly quick: QuickMode;
 	/** Remote (token-based) tunnels — `tk.remote.start(...)`, etc. */
-	readonly remote: RemoteTunnels;
+	readonly remote: RemoteMode;
 	/** Local (named) tunnels and all account operations — `tk.local.login(...)`, etc. */
-	readonly local: LocalTunnels;
+	readonly local: LocalMode;
 
 	constructor(options: TunnelKitOptions = {}) {
 		super();
@@ -134,12 +137,13 @@ export class TunnelKit extends EventEmitter {
 		this.log = resolveLogger(options.logger);
 		this.quickTimeoutMs = options.quickTimeoutMs ?? 30000;
 		this.connectTimeoutMs = options.connectTimeoutMs ?? 60000;
-		this.isTunnelKnown = options.isTunnelKnown ?? (() => false);
 		this._store = options.store === false
 			? null
 			: options.store instanceof TunnelStore
 				? options.store
 				: new TunnelStore({ dataDir: this.dataDir, logger: options.logger });
+		this.isTunnelKnown = options.isTunnelKnown
+			?? (this._store ? (tunnelId) => this._store!.getLocals().some((l) => l.tunnelId === tunnelId) : () => false);
 		this.certPath = join(this.dataDir, 'cert.pem');
 
 		const ctx: ManagerContext = {
@@ -165,9 +169,9 @@ export class TunnelKit extends EventEmitter {
 			ensureDataDir: () => this.ensureDataDir()
 		};
 
-		this.quick = new QuickTunnels(ctx);
-		this.remote = new RemoteTunnels(ctx);
-		this.local = new LocalTunnels(ctx);
+		this.quick = new QuickMode(ctx);
+		this.remote = new RemoteMode(ctx);
+		this.local = new LocalMode(ctx);
 	}
 
 	/**
@@ -191,6 +195,21 @@ export class TunnelKit extends EventEmitter {
 		return installBinary({ installDir: this.installDir, version, logger: this.log });
 	}
 
+	/**
+	 * Resolve a usable cloudflared binary, downloading the managed copy on first
+	 * use when none is on PATH. Subsequent calls are no-ops. Returns the resolved
+	 * path; throws {@link CloudflaredMissingError} if the install attempt fails.
+	 */
+	async ensureBinary(): Promise<string> {
+		const resolved = resolveCloudflaredBinary(this.installDir);
+		if (resolved) return resolved;
+		this.log.log('cloudflared not found — downloading…');
+		await this.installBinary();
+		const after = resolveCloudflaredBinary(this.installDir);
+		if (!after) throw new CloudflaredMissingError();
+		return after;
+	}
+
 	/** Resolved cloudflared status: `{ installed, version, path }`. */
 	getBinaryStatus(): BinaryStatus {
 		return getBinaryStatus(this.installDir);
@@ -200,7 +219,7 @@ export class TunnelKit extends EventEmitter {
 	private requireBinary(onProgress?: ProgressCallback): string {
 		const resolved = resolveCloudflaredBinary(this.installDir);
 		if (!resolved) {
-			this.log.warn('cloudflared binary not available; call installBinary() or install it system-wide');
+			this.log.warn('cloudflared binary not available; call ensureBinary() or install it system-wide');
 			throw new CloudflaredMissingError();
 		}
 		onProgress?.('binary-ready', { path: resolved });

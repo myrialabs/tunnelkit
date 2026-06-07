@@ -6,9 +6,9 @@
  * `tk.quick` on a {@link TunnelKit}.
  */
 
-import { CloudflaredTunnel } from '../tunnel.js';
+import { CloudflaredTunnel } from '../cloudflared-tunnel.js';
 import type { ActiveTunnel, ProgressCallback } from '../types.js';
-import { waitForStart, ConnectionTracker, type ManagerContext } from './shared.js';
+import { waitForStart, ConnectionTracker, type ManagerContext } from './context.js';
 
 /**
  * Resolve a quick-tunnel target into a service URL. A bare port number
@@ -28,7 +28,7 @@ export function resolveQuickService(service: string | number): string {
 	return raw;
 }
 
-interface QuickInstance {
+interface QuickTunnelHandle {
 	tunnel: CloudflaredTunnel;
 	startedAt: Date;
 	publicUrl: string;
@@ -38,8 +38,8 @@ interface QuickInstance {
 	connections: ConnectionTracker;
 }
 
-export class QuickTunnels {
-	private readonly tunnels = new Map<string, QuickInstance>();
+export class QuickMode {
+	private readonly tunnels = new Map<string, QuickTunnelHandle>();
 
 	constructor(private readonly ctx: ManagerContext) {}
 

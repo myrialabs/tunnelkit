@@ -23,9 +23,7 @@ if (!hostname) {
 
 const tk = new TunnelKit({ logger: console }); // persistence on by default → tk.store
 
-if (!tk.isBinaryInstalled()) {
-	await tk.installBinary();
-}
+await tk.ensureBinary();
 
 // 1. Authenticate (once). The auth URL must be opened in a browser; cloudflared
 //    writes an origin cert when approved.

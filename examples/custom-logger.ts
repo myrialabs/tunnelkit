@@ -17,7 +17,7 @@ const logger: Logger = {
 };
 
 const tk = new TunnelKit({ logger });
-if (!tk.isBinaryInstalled()) await tk.installBinary();
+await tk.ensureBinary();
 
 const service = process.argv[2] ?? '3000';
 const { publicUrl } = await tk.quick.start({ service });

@@ -8,29 +8,29 @@
  * {@link TunnelKit}.
  */
 
-import { CloudflaredTunnel } from '../tunnel.js';
+import { CloudflaredTunnel } from '../cloudflared-tunnel.js';
 import type { ActiveTunnel, IngressInfo, ProgressCallback } from '../types.js';
-import { waitForStart, ConnectionTracker, type ManagerContext } from './shared.js';
+import { waitForStart, ConnectionTracker, type ManagerContext } from './context.js';
 
-interface RemoteInstance {
+interface RemoteTunnelHandle {
 	tunnel: CloudflaredTunnel;
 	startedAt: Date;
 	id: string;
-	label: string;
+	name: string;
 	ingress: IngressInfo[];
 	connections: ConnectionTracker;
 }
 
-export class RemoteTunnels {
-	private readonly tunnels = new Map<string, RemoteInstance>();
+export class RemoteMode {
+	private readonly tunnels = new Map<string, RemoteTunnelHandle>();
 
 	constructor(private readonly ctx: ManagerContext) {}
 
 	async start(
-		opts: { id: string; token: string; label?: string; signal?: AbortSignal },
+		opts: { id: string; token: string; name?: string; signal?: AbortSignal },
 		onProgress?: ProgressCallback
 	): Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }> {
-		const label = opts.label ?? opts.id;
+		const name = opts.name ?? opts.id;
 		onProgress?.('checking-binary');
 		const binaryPath = this.ctx.requireBinary(onProgress);
 		const timings: Record<string, number> = {};
@@ -40,14 +40,14 @@ export class RemoteTunnels {
 			return { ingress: running.ingress, timings };
 		}
 
-		onProgress?.('starting-tunnel', { label });
+		onProgress?.('starting-tunnel', { name });
 		const startTime = Date.now();
 
 		const tunnel = CloudflaredTunnel.withToken(opts.token, binaryPath);
-		const instance: RemoteInstance = {
+		const handle: RemoteTunnelHandle = {
 			tunnel,
 			id: opts.id,
-			label,
+			name,
 			startedAt: new Date(),
 			ingress: [],
 			connections: new ConnectionTracker()
@@ -55,25 +55,25 @@ export class RemoteTunnels {
 
 		tunnel.on('config', (data) => {
 			if (data.config?.ingress && Array.isArray(data.config.ingress)) {
-				instance.ingress = data.config.ingress.map((rule: { hostname?: string; service: string }) => ({
+				handle.ingress = data.config.ingress.map((rule: { hostname?: string; service: string }) => ({
 					hostname: rule.hostname,
 					service: rule.service
 				}));
-				this.ctx.log.log(`[remote:${label}] config synced, ${instance.ingress.length} ingress rules`);
-				this.ctx.emitIngress(opts.id, instance.ingress);
+				this.ctx.log.log(`[remote:${name}] config synced, ${handle.ingress.length} ingress rules`);
+				this.ctx.emitIngress(opts.id, handle.ingress);
 			}
 		});
 		tunnel.on('connected', (info) => {
-			instance.connections.apply(info, 'up');
+			handle.connections.apply(info, 'up');
 			this.ctx.emitConnection(opts.id, info, 'up');
 		});
 		tunnel.on('disconnected', (info) => {
-			instance.connections.apply(info, 'down');
+			handle.connections.apply(info, 'down');
 			this.ctx.emitConnection(opts.id, info, 'down');
 		});
-		tunnel.on('error', (error) => this.ctx.log.error(`[remote:${label}] error:`, error));
+		tunnel.on('error', (error) => this.ctx.log.error(`[remote:${name}] error:`, error));
 		tunnel.on('exit', (code) => {
-			this.ctx.log.log(`[remote:${label}] exit code ${code}`);
+			this.ctx.log.log(`[remote:${name}] exit code ${code}`);
 			this.tunnels.delete(opts.id);
 			this.ctx.emitStatus();
 		});
@@ -89,27 +89,27 @@ export class RemoteTunnels {
 		});
 
 		timings.tunnelStart = Date.now() - startTime;
-		this.tunnels.set(opts.id, instance);
-		this.ctx.store?.upsertRemote(opts.id, label, opts.token);
+		this.tunnels.set(opts.id, handle);
+		this.ctx.store?.upsertRemote(opts.id, name, opts.token);
 
-		this.ctx.log.log(`Remote tunnel started: ${label}`);
+		this.ctx.log.log(`Remote tunnel started: ${name}`);
 		onProgress?.('connected', { timings });
 		this.ctx.emitStatus();
 
-		return { ingress: instance.ingress, timings };
+		return { ingress: handle.ingress, timings };
 	}
 
 	async stop(id: string): Promise<void> {
-		const instance = this.tunnels.get(id);
-		if (!instance) return;
+		const handle = this.tunnels.get(id);
+		if (!handle) return;
 
 		try {
-			instance.tunnel.stop();
+			handle.tunnel.stop();
 		} catch (err) {
-			this.ctx.log.warn(`Failed to stop remote tunnel ${instance.label}:`, err);
+			this.ctx.log.warn(`Failed to stop remote tunnel ${handle.name}:`, err);
 		}
 		this.tunnels.delete(id);
-		this.ctx.log.log(`Remote tunnel stopped: ${instance.label}`);
+		this.ctx.log.log(`Remote tunnel stopped: ${handle.name}`);
 		this.ctx.emitStatus();
 	}
 
@@ -125,16 +125,16 @@ export class RemoteTunnels {
 	/** Snapshot of this mode's tunnels for the manager's aggregate `list()`. */
 	snapshot(): ActiveTunnel[] {
 		const tunnels: ActiveTunnel[] = [];
-		for (const instance of this.tunnels.values()) {
-			const firstHostname = instance.ingress.find((r) => r.hostname)?.hostname;
+		for (const handle of this.tunnels.values()) {
+			const firstHostname = handle.ingress.find((r) => r.hostname)?.hostname;
 			tunnels.push({
-				id: instance.id,
+				id: handle.id,
 				type: 'remote',
 				publicUrl: firstHostname ? `https://${firstHostname}` : '',
-				startedAt: instance.startedAt.toISOString(),
-				label: instance.label,
-				ingress: instance.ingress,
-				connections: instance.connections.list()
+				startedAt: handle.startedAt.toISOString(),
+				name: handle.name,
+				ingress: handle.ingress,
+				connections: handle.connections.list()
 			});
 		}
 		return tunnels;

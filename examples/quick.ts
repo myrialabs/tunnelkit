@@ -11,10 +11,7 @@ const service = process.argv[2] ?? '3000';
 
 const tk = new TunnelKit({ logger: console });
 
-if (!tk.isBinaryInstalled()) {
-	console.log('cloudflared not found — downloading...');
-	await tk.installBinary();
-}
+await tk.ensureBinary();
 
 tk.on('status-changed', (tunnels) => {
 	console.log('status-changed:', tunnels);

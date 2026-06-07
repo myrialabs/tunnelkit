@@ -30,7 +30,7 @@ import { resolveCloudflaredBinary } from './binary.js';
 export class CloudflaredMissingError extends Error {
 	constructor() {
 		super(
-			'cloudflared binary not found. Install it via installBinary(), or install cloudflared system-wide so it is on your PATH.'
+			'cloudflared binary not found. Call ensureBinary() to download it, or install cloudflared system-wide so it is on your PATH.'
 		);
 		this.name = 'CloudflaredMissingError';
 	}

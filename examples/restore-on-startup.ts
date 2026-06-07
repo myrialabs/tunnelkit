@@ -13,7 +13,7 @@ import { TunnelKit } from '../src/index.js';
 
 const tk = new TunnelKit({ logger: console }); // persistence on by default → tk.store
 
-if (!tk.isBinaryInstalled()) await tk.installBinary();
+await tk.ensureBinary();
 
 const remotes = tk.store?.getRemotes() ?? [];
 const locals = (tk.store?.getLocals() ?? []).filter((l) => l.ingress.length > 0);
@@ -24,8 +24,8 @@ if (remotes.length === 0 && locals.length === 0) {
 }
 
 for (const r of remotes) {
-	console.log(`Restoring remote: ${r.label}`);
-	await tk.remote.start({ id: r.id, token: r.token, label: r.label });
+	console.log(`Restoring remote: ${r.name}`);
+	await tk.remote.start({ id: r.id, token: r.token, name: r.name });
 }
 
 for (const l of locals) {

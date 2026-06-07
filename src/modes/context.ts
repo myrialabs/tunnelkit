@@ -1,14 +1,14 @@
 /**
  * Shared plumbing for the per-mode controllers.
  *
- * Each mode ({@link QuickTunnels}, {@link RemoteTunnels}, {@link LocalTunnels})
+ * Each mode ({@link QuickMode}, {@link RemoteMode}, {@link LocalMode})
  * is a thin facade that owns its own registry but leans on a common
  * {@link ManagerContext} for everything cross-cutting: binary resolution,
  * persistence, event emission, and the data directory. `TunnelKit` builds the
- * context and wires the three facades together — see `manager.ts`.
+ * context and wires the three facades together — see `tunnelkit.ts`.
  */
 
-import type { CloudflaredTunnel, ConnectionInfo } from '../tunnel.js';
+import type { CloudflaredTunnel, ConnectionInfo } from '../cloudflared-tunnel.js';
 import type { Logger } from '../logger.js';
 import type { TunnelStore } from '../store.js';
 import type { IngressInfo, ProgressCallback } from '../types.js';

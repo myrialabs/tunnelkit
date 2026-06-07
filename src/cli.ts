@@ -41,9 +41,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 
-import { TunnelKit, resolveQuickService, CLOUDFLARE_TUNNELS_DASHBOARD_URL } from './manager.js';
+import { TunnelKit, resolveQuickService, CLOUDFLARE_TUNNELS_DASHBOARD_URL } from './tunnelkit.js';
 import { TunnelStore } from './store.js';
-import { CloudflaredMissingError } from './tunnel.js';
+import { CloudflaredMissingError } from './cloudflared-tunnel.js';
 import type { Logger } from './logger.js';
 import { parseCliArgs, firstValue, type ParsedArgs } from './cli-args.js';
 import {
@@ -142,10 +142,10 @@ async function startQuick(tk: TunnelKit, service: string, autoStopMinutes: numbe
 	out(c.green(`✓ quick · ${started.publicUrl}`));
 }
 
-async function startRemote(tk: TunnelKit, opts: { id: string; token: string; label?: string }): Promise<void> {
+async function startRemote(tk: TunnelKit, opts: { id: string; token: string; name?: string }): Promise<void> {
 	await ensureBinary(tk);
 	await runCancelable('Starting remote tunnel…', (signal) => tk.remote.start({ ...opts, signal })); // TunnelKit persists it
-	out(c.green(`✓ remote · ${opts.label ?? opts.id}`));
+	out(c.green(`✓ remote · ${opts.name ?? opts.id}`));
 }
 
 function requireLocalAuth(tk: TunnelKit): void {
@@ -293,7 +293,7 @@ async function cmdRemote(parsed: ParsedArgs): Promise<void> {
 	// Token precedence: --token / CF_TUNNEL_TOKEN, else a saved entry by name.
 	let explicitToken = firstValue(parsed, 'token') ?? process.env.CF_TUNNEL_TOKEN;
 	const saved = !explicitToken && name && store
-		? store.getRemotes().find((r) => r.label === name || r.id === name)
+		? store.getRemotes().find((r) => r.name === name || r.id === name)
 		: undefined;
 
 	// No token and no saved match: prompt for one when interactive.
@@ -310,12 +310,12 @@ async function cmdRemote(parsed: ParsedArgs): Promise<void> {
 		);
 	}
 
-	const explicitName = firstValue(parsed, 'label') ?? name;
-	const label = firstValue(parsed, 'label') ?? saved?.label ?? name;
-	// Key the saved entry by a stable, meaningful id so distinct labels don't collide.
+	const explicitName = firstValue(parsed, 'name') ?? name;
+	const tunnelName = firstValue(parsed, 'name') ?? saved?.name ?? name;
+	// Key the saved entry by a stable, meaningful id so distinct names don't collide.
 	const id = firstValue(parsed, 'id') ?? saved?.id ?? explicitName ?? 'cli-remote';
 
-	await startRemote(tk, { id, token, label });
+	await startRemote(tk, { id, token, name: tunnelName });
 
 	// A freshly-supplied token under a usable name can be reused next time.
 	if (store && explicitToken && explicitName) {
@@ -443,7 +443,7 @@ function cmdSaved(parsed: ParsedArgs): void {
 
 	if (remotes.length > 0) {
 		out(c.bold('REMOTE'));
-		for (const r of remotes) out(`  ${r.label}  ${c.dim(r.id)}`);
+		for (const r of remotes) out(`  ${r.name}  ${c.dim(r.id)}`);
 	}
 	if (locals.length > 0) {
 		if (remotes.length > 0) out('');
@@ -463,7 +463,7 @@ function cmdForget(parsed: ParsedArgs): void {
 	const store = makeStore(parsed);
 	if (!store) throw new Error('Cannot forget a saved tunnel while --no-save is set.');
 
-	const remote = store.getRemotes().find((r) => r.label === target || r.id === target);
+	const remote = store.getRemotes().find((r) => r.name === target || r.id === target);
 	if (remote) {
 		store.removeRemote(remote.id);
 		out(c.green(`✓ Forgot remote "${target}". (The Cloudflare tunnel itself is untouched.)`));
@@ -571,19 +571,19 @@ async function addRemote(tk: TunnelKit): Promise<void> {
 	let pick = useNew;
 	if (saved.length > 0) {
 		pick = await select('Remote token', [
-			...saved.map((r) => ({ label: r.label, value: r.id, hint: 'saved token' })),
+			...saved.map((r) => ({ label: r.name, value: r.id, hint: 'saved token' })),
 			{ label: 'Paste a new token…', value: useNew }
 		]);
 	}
 	if (pick !== useNew) {
 		const entry = saved.find((r) => r.id === pick);
-		if (entry) return await startRemote(tk, { id: entry.id, token: entry.token, label: entry.label });
+		if (entry) return await startRemote(tk, { id: entry.id, token: entry.token, name: entry.name });
 	}
 	const token = await prompt('Tunnel token', { required: true, secret: true });
-	const label = (await prompt('Label (optional)', { default: '' })).trim();
-	// Distinct id per unlabeled tunnel so a second one doesn't collide with the first.
-	const id = label || `remote-${Date.now()}`;
-	await startRemote(tk, { id, token, label: label || undefined });
+	const name = (await prompt('Name (optional)', { default: '' })).trim();
+	// Distinct id per unnamed tunnel so a second one doesn't collide with the first.
+	const id = name || `remote-${Date.now()}`;
+	await startRemote(tk, { id, token, name: name || undefined });
 }
 
 async function addLocal(tk: TunnelKit): Promise<void> {
@@ -615,7 +615,7 @@ async function addSaved(tk: TunnelKit): Promise<void> {
 	const remotes = tk.store?.getRemotes() ?? [];
 	const locals = tk.store?.getLocals() ?? [];
 	const choices: Choice<string>[] = [
-		...remotes.map((r) => ({ label: r.label, value: `remote:${r.id}`, hint: 'remote' })),
+		...remotes.map((r) => ({ label: r.name, value: `remote:${r.id}`, hint: 'remote' })),
 		...locals.map((l) => ({ label: l.name, value: `local:${l.id}`, hint: 'local' })),
 		{ label: 'Cancel', value: 'cancel' }
 	];
@@ -627,7 +627,7 @@ async function addSaved(tk: TunnelKit): Promise<void> {
 	const id = pick.slice(sep + 1);
 	if (kind === 'remote') {
 		const entry = remotes.find((r) => r.id === id);
-		if (entry) await startRemote(tk, { id: entry.id, token: entry.token, label: entry.label });
+		if (entry) await startRemote(tk, { id: entry.id, token: entry.token, name: entry.name });
 	} else {
 		const entry = locals.find((l) => l.id === id);
 		if (entry) await startLocalSaved(tk, entry.name, entry);
@@ -674,7 +674,7 @@ ${c.bold('GENERAL')}
 ${c.bold('OPTIONS')}
   --auto-stop <minutes>        quick: minutes until auto-stop (default 0 — never)
   --token <token>              remote run: tunnel token (or set CF_TUNNEL_TOKEN)
-  --label <label>              remote run: friendly name (used to save & reuse the token)
+  --name <name>                remote run: name used to save & reuse the token
   --id <id>                    remote run: stable id for the tunnel (default cli-remote)
   --route <hostname=service>   local run: ingress rule (repeatable)
   --hostname <host>            local run: single ingress hostname (pair with --service)
@@ -698,7 +698,7 @@ ${c.bold('EXAMPLES')}
   tunnelkit                                  # interactive control panel
   tunnelkit quick 3000
   tunnelkit quick http://localhost:8080 --auto-stop 30
-  tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --label prod
+  tunnelkit remote run --token "$CF_TUNNEL_TOKEN" --name prod
   tunnelkit remote run prod                  # reuse the saved "prod" token
   tunnelkit local login
   tunnelkit local run my-app --route app.example.com=http://localhost:3000
