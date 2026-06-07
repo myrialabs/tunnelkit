@@ -11,7 +11,7 @@ const service = process.argv[2] ?? '3000';
 
 const tk = new TunnelKit({ logger: console });
 
-await tk.ensureBinary();
+await tk.bin.ensure();
 
 tk.on('status-changed', (tunnels) => {
 	console.log('status-changed:', tunnels);

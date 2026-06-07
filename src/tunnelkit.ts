@@ -16,8 +16,7 @@
  * aggregate registry/`list()` across all modes, and events. By default it also
  * **persists** the remote and local tunnels you start (to `<dataDir>/config.json`),
  * so you can restore them later through `tk.store`. Set `dataDir` to change where
- * that lives, or pass `store: false` to disable it. Quick tunnels are ephemeral
- * and never saved.
+ * that lives. Quick tunnels are ephemeral and never saved.
  *
  * Emits:
  * - 'status-changed' (tunnels: ActiveTunnel[])      when a tunnel starts/stops, or its connection count changes
@@ -61,6 +60,52 @@ export { resolveQuickService };
  */
 export const CLOUDFLARE_TUNNELS_DASHBOARD_URL = 'https://dash.cloudflare.com/?to=/:account/tunnels';
 
+/**
+ * Binary management for a TunnelKit instance. Exposed as `tk.bin`.
+ *
+ * ```ts
+ * await tk.bin.ensure();              // resolve, downloading on first use
+ * tk.bin.status();                    // { installed, version, path }
+ * await tk.bin.install('2024.12.2'); // pin a specific version
+ * ```
+ */
+export class BinaryManager {
+	constructor(
+		private readonly installDir: string,
+		private readonly log: Required<Logger>
+	) {}
+
+	/** Whether a managed cloudflared binary exists in `installDir`. */
+	isInstalled(): boolean {
+		return isBinaryInstalled(this.installDir);
+	}
+
+	/**
+	 * Resolve a usable cloudflared binary, downloading on first use when none is
+	 * found on PATH or in `installDir`. Returns the path; throws
+	 * {@link CloudflaredMissingError} if the install attempt fails.
+	 */
+	async ensure(): Promise<string> {
+		const resolved = resolveCloudflaredBinary(this.installDir);
+		if (resolved) return resolved;
+		this.log.log('cloudflared not found — downloading…');
+		await this.install();
+		const after = resolveCloudflaredBinary(this.installDir);
+		if (!after) throw new CloudflaredMissingError();
+		return after;
+	}
+
+	/** Download cloudflared into `installDir`. Omit `version` for latest. */
+	async install(version = 'latest'): Promise<string> {
+		return installBinary({ installDir: this.installDir, version, logger: this.log });
+	}
+
+	/** Resolved cloudflared status: `{ installed, version, path }`. */
+	status(): BinaryStatus {
+		return getBinaryStatus(this.installDir);
+	}
+}
+
 export interface TunnelKitOptions {
 	/** Directory for cert.pem, tunnel credentials, and generated configs. Default: `~/.tunnelkit`. */
 	dataDir?: string;
@@ -88,7 +133,7 @@ export interface TunnelKitOptions {
 	 * change where, set `dataDir`.
 	 *
 	 * - **omitted / `true`** (default): auto-save to `<dataDir>/config.json`.
-	 * - **`false`**: disable persistence entirely (stateless).
+	 * - **`false`**: use a noop store — reads return empty, writes are skipped.
 	 * - **a `TunnelStore`** (advanced): use your own instance instead.
 	 */
 	store?: boolean | TunnelStore;
@@ -118,7 +163,7 @@ export class TunnelKit extends EventEmitter {
 	private readonly quickTimeoutMs: number;
 	private readonly connectTimeoutMs: number;
 	private readonly isTunnelKnown: (tunnelId: string) => boolean;
-	private readonly _store: TunnelStore | null;
+	private readonly _store: TunnelStore;
 
 	private readonly certPath: string;
 	private readonly defaultCloudflaredCert = join(homedir(), '.cloudflared', 'cert.pem');
@@ -129,6 +174,8 @@ export class TunnelKit extends EventEmitter {
 	readonly remote: RemoteMode;
 	/** Local (named) tunnels and all account operations — `tk.local.login(...)`, etc. */
 	readonly local: LocalMode;
+	/** Binary management — `tk.bin.ensure()`, `tk.bin.status()`, `tk.bin.install()`. */
+	readonly bin: BinaryManager;
 
 	constructor(options: TunnelKitOptions = {}) {
 		super();
@@ -137,13 +184,13 @@ export class TunnelKit extends EventEmitter {
 		this.log = resolveLogger(options.logger);
 		this.quickTimeoutMs = options.quickTimeoutMs ?? 30000;
 		this.connectTimeoutMs = options.connectTimeoutMs ?? 60000;
-		this._store = options.store === false
-			? null
-			: options.store instanceof TunnelStore
-				? options.store
+		this._store = options.store instanceof TunnelStore
+			? options.store
+			: options.store === false
+				? new TunnelStore({ noop: true })
 				: new TunnelStore({ dataDir: this.dataDir, logger: options.logger });
 		this.isTunnelKnown = options.isTunnelKnown
-			?? (this._store ? (tunnelId) => this._store!.getLocals().some((l) => l.tunnelId === tunnelId) : () => false);
+			?? ((tunnelId) => this._store.getLocals().some((l) => l.tunnelId === tunnelId));
 		this.certPath = join(this.dataDir, 'cert.pem');
 
 		const ctx: ManagerContext = {
@@ -172,54 +219,22 @@ export class TunnelKit extends EventEmitter {
 		this.quick = new QuickMode(ctx);
 		this.remote = new RemoteMode(ctx);
 		this.local = new LocalMode(ctx);
+		this.bin = new BinaryManager(this.installDir, this.log);
 	}
 
 	/**
-	 * The persistence store backing auto-save, or `null` when persistence is
-	 * disabled (`store: false`). Read saved tunnels from it (e.g. to restore on
-	 * startup): `tk.store?.getRemotes()`, `tk.store?.getLocals()`.
+	 * The persistence store backing auto-save. Read saved tunnels from it (e.g.
+	 * to restore on startup): `tk.store.getRemotes()`, `tk.store.getLocals()`.
 	 */
-	get store(): TunnelStore | null {
+	get store(): TunnelStore {
 		return this._store;
-	}
-
-	// --- Binary ---
-
-	/** Whether a managed cloudflared binary is installed in `installDir`. */
-	isBinaryInstalled(): boolean {
-		return isBinaryInstalled(this.installDir);
-	}
-
-	/** Download cloudflared into `installDir`. Never called automatically. */
-	async installBinary(version = 'latest'): Promise<string> {
-		return installBinary({ installDir: this.installDir, version, logger: this.log });
-	}
-
-	/**
-	 * Resolve a usable cloudflared binary, downloading the managed copy on first
-	 * use when none is on PATH. Subsequent calls are no-ops. Returns the resolved
-	 * path; throws {@link CloudflaredMissingError} if the install attempt fails.
-	 */
-	async ensureBinary(): Promise<string> {
-		const resolved = resolveCloudflaredBinary(this.installDir);
-		if (resolved) return resolved;
-		this.log.log('cloudflared not found — downloading…');
-		await this.installBinary();
-		const after = resolveCloudflaredBinary(this.installDir);
-		if (!after) throw new CloudflaredMissingError();
-		return after;
-	}
-
-	/** Resolved cloudflared status: `{ installed, version, path }`. */
-	getBinaryStatus(): BinaryStatus {
-		return getBinaryStatus(this.installDir);
 	}
 
 	/** Resolve a usable binary path or throw {@link CloudflaredMissingError}. */
 	private requireBinary(onProgress?: ProgressCallback): string {
 		const resolved = resolveCloudflaredBinary(this.installDir);
 		if (!resolved) {
-			this.log.warn('cloudflared binary not available; call ensureBinary() or install it system-wide');
+			this.log.warn('cloudflared binary not available; call tk.bin.ensure() or install it system-wide');
 			throw new CloudflaredMissingError();
 		}
 		onProgress?.('binary-ready', { path: resolved });
@@ -255,5 +270,24 @@ export class TunnelKit extends EventEmitter {
 		this.log.log('Stopping all tunnels...');
 		await Promise.all([this.quick.stopAll(), this.remote.stopAll(), this.local.stopAll()]);
 		this.log.log('All tunnels stopped');
+	}
+
+	/**
+	 * Start every tunnel that was previously saved to the store (remote and
+	 * local). Quick tunnels are ephemeral and never saved, so they are not
+	 * restored. Returns the count of tunnels started.
+	 *
+	 * ```ts
+	 * const { remotes, locals } = await tk.restoreAll();
+	 * ```
+	 */
+	async restoreAll(): Promise<{ remotes: number; locals: number }> {
+		const remotes = this.store.getRemotes();
+		const locals = this.store.getLocals().filter((l) => l.ingress.length > 0);
+		await Promise.all([
+			...remotes.map((r) => this.remote.start(r)),
+			...locals.map((l) => this.local.start(l))
+		]);
+		return { remotes: remotes.length, locals: locals.length };
 	}
 }

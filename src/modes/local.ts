@@ -212,6 +212,36 @@ export class LocalMode {
 		return result;
 	}
 
+	/**
+	 * Find a saved config by `id` or `hostname`, or create one: runs `create`,
+	 * `routeDns`, saves the result to the store, and returns the config. On
+	 * subsequent runs the saved record is returned immediately without touching
+	 * Cloudflare again.
+	 *
+	 * ```ts
+	 * const config = await tk.local.prepare({ id: 'storefront', hostname: 'app.example.com', service: 'http://localhost:3000' });
+	 * await tk.local.start(config);
+	 * ```
+	 */
+	async prepare(opts: { id: string; hostname: string; service: string }): Promise<LocalTunnelConfig> {
+		const existing = this.ctx.store.getLocals().find(
+			(l) => l.id === opts.id || l.ingress.some((r) => r.hostname === opts.hostname)
+		);
+		if (existing) return existing;
+
+		const created = await this.create(opts.id);
+		await this.routeDns(opts.id, opts.hostname);
+		const config: LocalTunnelConfig = {
+			id: opts.id,
+			name: opts.id,
+			tunnelId: created.tunnelId,
+			credentialsFile: created.credentialsFile,
+			ingress: [{ hostname: opts.hostname, service: opts.service }]
+		};
+		this.ctx.store.upsertLocal(config);
+		return config;
+	}
+
 	/** List every named tunnel on the authenticated Cloudflare account. */
 	async list(): Promise<TunnelListEntry[]> {
 		const binaryPath = this.ctx.requireBinary();
@@ -297,7 +327,7 @@ export class LocalMode {
 			ingress: config.ingress.map((r) => ({ hostname: r.hostname, service: r.service })),
 			connections
 		});
-		this.ctx.store?.upsertLocal({
+		this.ctx.store.upsertLocal({
 			id: config.id,
 			name: config.name,
 			tunnelId: config.tunnelId,

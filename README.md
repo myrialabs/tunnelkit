@@ -30,7 +30,7 @@ internet in a few lines.
 import { TunnelKit } from 'tunnelkit';
 
 const tk = new TunnelKit();
-await tk.ensureBinary();
+await tk.bin.ensure();
 
 const { publicUrl } = await tk.quick.start({ service: 3000 }); // port → http://localhost:3000
 console.log(publicUrl); // https://random-words.trycloudflare.com
@@ -48,7 +48,7 @@ tunnelkit quick 3000    # → https://random-words.trycloudflare.com
 - **All three modes, first-class** — Quick, Remote (token), and Local (named), each behind its own namespace.
 - **Fully typed, including events** — `TunnelKit` and `CloudflaredTunnel` are typed `EventEmitter`s.
 - **Manages the binary** — downloads `cloudflared` on demand, or reuses one already on `PATH`.
-- **Persistence on by default** — remote/local tunnels you start are saved so you can restore them by name; point it anywhere with a custom `TunnelStore`, or pass `store: false` to opt out.
+- **Persistence on by default** — remote/local tunnels you start are saved so you can restore them by name; point it anywhere with a custom `TunnelStore`, or pass `store: false` to disable. `tk.store` is always accessible.
 - **Ships a CLI** — the same capabilities from your terminal via `tunnelkit <command>`.
 - **Zero dependencies** — pure Node built-ins. Runs identically on **Node 18+** and **Bun**.
 
@@ -64,7 +64,7 @@ Each mode lives under its own namespace (`tk.quick`, `tk.remote`, `tk.local`).
 | Account tunnel list | `tk.local.list` |
 | Auto-stop (quick) | `tk.quick.start({ autoStopMinutes })` |
 | Live status / ingress / connections | `'status-changed'` / `'ingress-update'` / `'connection'` events; `tk.list()` carries live `connections` per tunnel |
-| Binary install / status | `ensureBinary` / `installBinary` / `isBinaryInstalled` / `getBinaryStatus` |
+| Binary install / status | `tk.bin.ensure` / `tk.bin.install` / `tk.bin.isInstalled` / `tk.bin.status` |
 | Config persistence | `TunnelStore` (on by default, API & CLI) |
 | Low-level process control | `CloudflaredTunnel` |
 | Terminal usage | `tunnelkit` CLI ([docs](./docs/cli.md)) |
@@ -77,7 +77,7 @@ bun add -g tunnelkit       # or globally, for the CLI
 # npm install tunnelkit / npm i -g tunnelkit
 ```
 
-You also need the `cloudflared` binary. tunnelkit can download it (`installBinary()` /
+You also need the `cloudflared` binary. tunnelkit can download it (`tk.bin.ensure()` /
 `tunnelkit install`), or use one already on your `PATH` (brew/apt/winget).
 
 ## The three modes
@@ -156,7 +156,7 @@ tunnelkit install && tunnelkit status
 ```
 
 Run `tunnelkit` with no command in a terminal for a **live control panel** — manage several tunnels
-at once (`n` new, `↑/↓` select, `x` stop, `c` copy URL, `q` quit). See the
+at once (`↑/↓` select, `n` new, `x` stop, `c` copy URL, `f` forget a saved one, `q` quit). See the
 [CLI reference](./docs/cli.md) for every command and flag.
 
 ## Events
@@ -186,14 +186,14 @@ file (`<dataDir>/config.json`, written `0600`).
 ```ts
 new TunnelKit();                                  // auto-save under dataDir (default)
 new TunnelKit({ dataDir: '~/.myapp/tunnels' });   // save somewhere else
-new TunnelKit({ store: false });                  // disable persistence entirely
+new TunnelKit({ store: false });                  // noop store — reads empty, writes skipped
 ```
 
 Read saved tunnels back from `tk.store` — e.g. to restore everything on startup:
 
 ```ts
 const tk = new TunnelKit();
-for (const r of tk.store?.getRemotes() ?? []) await tk.remote.start(r);
+await tk.restoreAll();
 ```
 
 `TunnelStore` has no dependency on `TunnelKit`, so you can also use it standalone:
@@ -210,13 +210,13 @@ store.addLocalIngress(id, 'app.example.com', 'http://localhost:3000');
 
 Everything shells out to `cloudflared`. tunnelkit resolves it from the managed `installDir` (default
 `~/.tunnelkit/bin`), then from `PATH`. The library never downloads on its own — you call
-`installBinary()` when you want it. (The CLI downloads automatically on first use.)
+`tk.bin.ensure()` when you want it. (The CLI downloads automatically on first use.)
 
 ```ts
-tk.getBinaryStatus();                  // { installed, version, path }
-await tk.ensureBinary();               // resolve a binary, downloading on first use
-await tk.installBinary();              // download into installDir
-await tk.installBinary('2024.12.2');   // pin a version
+tk.bin.status();                       // { installed, version, path }
+await tk.bin.ensure();                 // resolve, downloading on first use
+await tk.bin.install();                // download into installDir
+await tk.bin.install('2024.12.2');     // pin a version
 ```
 
 If no binary can be resolved, operations throw `CloudflaredMissingError`.
@@ -227,7 +227,7 @@ If no binary can be resolved, operations throw `CloudflaredMissingError`.
 new TunnelKit({
   dataDir,          // ALL persisted state: cert.pem, credentials, configs, saved tunnels (default: ~/.tunnelkit)
   installDir,       // ONLY the cloudflared binary (default: ~/.tunnelkit/bin)
-  store,            // true / omit = auto-save; false = disable; (advanced) a TunnelStore instance
+  store,            // true/omit = auto-save; false = noop; (advanced) a TunnelStore instance
   logger,           // any { log, warn, error } — silent if omitted (try `console`)
   quickTimeoutMs,   // quick-tunnel URL timeout (default: 30000)
   connectTimeoutMs, // remote/local connection timeout (default: 60000)
@@ -292,9 +292,7 @@ process.on('SIGTERM', shutdown);
 
 ## Examples
 
-A dozen runnable scenarios live in [`examples/`](./examples/README.md) — webhooks, multiple tunnels,
-multi-hostname routing, account cleanup, restore-on-startup, binary management, error handling,
-and more.
+Four runnable scenarios cover the most common cases: quick tunnel, remote (token-based), local (named, full lifecycle), and restore-on-startup. See [`examples/`](./examples/README.md).
 
 ```sh
 bun run examples/quick.ts 3000

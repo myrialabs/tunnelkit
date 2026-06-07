@@ -1,45 +1,28 @@
 /**
- * Case: restore tunnels after a restart.
+ * Restore saved tunnels on startup.
  *
- * TunnelKit auto-saves the remote/local tunnels you start, so restoring is just
- * reading them back from `tk.store` and starting each again — the "reconnect
- * everything" routine you'd call at boot. (Quick tunnels are ephemeral and not
- * persisted.)
+ * TunnelKit auto-saves every remote and local tunnel you start, so bringing
+ * them back after a restart is a single call. Quick tunnels are ephemeral and
+ * never saved.
  *
  * Run with:  bun run examples/restore-on-startup.ts
  */
 
 import { TunnelKit } from '../src/index.js';
 
-const tk = new TunnelKit({ logger: console }); // persistence on by default → tk.store
+const tk = new TunnelKit({ logger: console });
 
-await tk.ensureBinary();
+await tk.bin.ensure();
 
-const remotes = tk.store?.getRemotes() ?? [];
-const locals = (tk.store?.getLocals() ?? []).filter((l) => l.ingress.length > 0);
+const { remotes, locals } = await tk.restoreAll();
 
-if (remotes.length === 0 && locals.length === 0) {
-	console.log('Nothing persisted yet. Run examples/local.ts to create one.');
+if (remotes + locals === 0) {
+	console.log('Nothing saved yet. Start some tunnels first (e.g. bun run examples/remote.ts).');
 	process.exit(0);
 }
 
-for (const r of remotes) {
-	console.log(`Restoring remote: ${r.name}`);
-	await tk.remote.start({ id: r.id, token: r.token, name: r.name });
-}
-
-for (const l of locals) {
-	console.log(`Restoring local: ${l.name}`);
-	await tk.local.start({
-		id: l.id,
-		name: l.name,
-		tunnelId: l.tunnelId,
-		credentialsFile: l.credentialsFile,
-		ingress: l.ingress
-	});
-}
-
-console.log('\nRestored:', tk.list());
+console.log(`\nRestored ${remotes} remote(s) and ${locals} local(s).`);
+console.log('Running:', tk.list().map((t) => t.id));
 
 process.on('SIGINT', async () => {
 	await tk.stopAll();

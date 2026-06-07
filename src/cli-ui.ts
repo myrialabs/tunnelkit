@@ -25,13 +25,73 @@ import type { ActiveTunnel, IngressInfo } from './types.js';
 // --- Colour (TTY-aware, honours NO_COLOR) ---
 
 export const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+
+/**
+ * Pick the richest ANSI form the terminal advertises and degrade gracefully:
+ * `COLORTERM=truecolor`/`24bit` → 24-bit RGB; otherwise a 256-colour `TERM`
+ * (e.g. `xterm-256color`) → 256-colour index; otherwise the basic 16 colours.
+ * Picking once at module load lets the colour helpers be straight constants.
+ */
+const colorTerm = (process.env.COLORTERM ?? '').toLowerCase();
+const term = (process.env.TERM ?? '').toLowerCase();
+const hasTrueColor = useColor && (colorTerm === 'truecolor' || colorTerm === '24bit');
+const has256 = useColor && (hasTrueColor || term.includes('256'));
+
+/** SGR for an RGB foreground. */
+const rgb = (r: number, g: number, b: number): string => `38;2;${r};${g};${b}`;
+/** SGR for a 256-palette foreground. */
+const c256 = (n: number): string => `38;5;${n}`;
+/** Best-available SGR for an RGB colour with a 256-palette and 16-colour fallback. */
+const fg = (r: number, g: number, b: number, palette256: number, basic: string): string =>
+	hasTrueColor ? rgb(r, g, b) : has256 ? c256(palette256) : basic;
+
+/**
+ * Pick the dark/light palette for this run. `TUNNELKIT_THEME=light|dark|auto`
+ * overrides detection (default `auto`). In `auto`, we read the `COLORFGBG`
+ * environment variable (set by most modern terminals) and treat a background of
+ * 7 (white) or 15 (bright white) as light; anything else defaults to dark.
+ * Pure (env-only) so it's unit-testable with a stubbed env.
+ */
+export function detectTheme(env: NodeJS.ProcessEnv = process.env): 'dark' | 'light' {
+	const override = (env.TUNNELKIT_THEME ?? '').toLowerCase();
+	if (override === 'light') return 'light';
+	if (override === 'dark') return 'dark';
+	const cfb = env.COLORFGBG;
+	if (cfb) {
+		const last = cfb.split(';').pop()?.trim() ?? '';
+		const bg = Number(last);
+		if (bg === 7 || bg === 15) return 'light';
+	}
+	return 'dark';
+}
+
+const THEME: 'dark' | 'light' = detectTheme();
+
+// Brand-aligned with tunnelkit-web (--accent-1 #f38020, --accent-2 #ffaa66,
+// --syn-string #86efac for URLs); the basic-16 fallbacks (yellow/green) keep
+// the look coherent on terminals that lack 256-colour support. Light theme
+// picks darker variants so the same hues stay readable on a white background
+// (WCAG AA for normal text needs ~4.5:1 on white).
+const ACCENT = THEME === 'dark' ? fg(243, 128, 32, 208, '33') : fg(154, 77, 4, 130, '33');
+const ACCENT_2 = THEME === 'dark' ? fg(255, 170, 102, 215, '93') : fg(184, 61, 4, 166, '31');
+const URL_GREEN = THEME === 'dark' ? fg(134, 239, 172, 156, '92') : fg(20, 83, 45, 22, '32');
+const TEXT_DIM = THEME === 'dark' ? fg(107, 104, 160, 60, '2') : fg(82, 82, 91, 240, '2');
+
 const paint = (code: string) => (s: string): string => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
 export const c = {
-	cyan: paint('36'),
+	/** Primary brand colour (orange) — used for headers, ❯ pointer, footer keys, status dots. */
+	accent: paint(ACCENT),
+	/** Lighter brand colour, used for emphasis (e.g. flashes). */
+	accent2: paint(ACCENT_2),
+	/** Greenish, used for URLs to echo the web's `--syn-string`. */
+	url: paint(URL_GREEN),
+	/** Brand colour kept as `cyan` for any existing callers; aliased to accent. */
+	cyan: paint(ACCENT),
 	green: paint('32'),
 	red: paint('31'),
 	yellow: paint('33'),
-	dim: paint('2'),
+	/** Muted text — purple-grey under 256/truecolor, ANSI dim (`2`) otherwise. */
+	dim: paint(TEXT_DIM),
 	bold: paint('1'),
 	magenta: paint('35')
 };
@@ -193,7 +253,7 @@ export function spinner(message: string): { stop: (final?: string) => void } {
 	let i = 0;
 	process.stdout.write(CURSOR_HIDE);
 	const timer = setInterval(() => {
-		process.stdout.write(`\r${CLEAR_LINE}${c.cyan(frames[i])} ${message}`);
+		process.stdout.write(`\r${CLEAR_LINE}${c.accent(frames[i])} ${message}`);
 		i = (i + 1) % frames.length;
 	}, 80);
 	return {
@@ -239,7 +299,7 @@ export function prompt(question: string, opts: PromptOptions = {}): Promise<stri
 		const masked = (s: string): string => (opts.secret ? '•'.repeat(s.length) : s);
 
 		const render = (): void => {
-			const line1 = `${c.cyan('?')} ${question}${defHint}: ${masked(value)}`;
+			const line1 = `${c.accent('?')} ${question}${defHint}: ${masked(value)}`;
 			const line2 = error ? c.yellow(`  ${error}`) : c.dim('  Enter submit · Esc cancel');
 			const col = plainLen(line1) + 1;
 			// The cursor lives at the end of `value`; repaint from there clearing
@@ -313,11 +373,13 @@ export function confirm(question: string, opts: { default?: boolean } = {}): Pro
 	const def = opts.default ?? false;
 	if (!process.stdin.isTTY) return Promise.resolve(def);
 
-	const line1 = `${c.cyan('?')} ${question} ${c.dim(`(${def ? 'Y/n' : 'y/N'})`)} `;
+	const line1 = `${c.accent('?')} ${question} ${c.dim(`(${def ? 'Y/n' : 'y/N'})`)} `;
 
 	return new Promise<boolean>((resolve, reject) => {
 		const render = (): void => {
-			const line2 = c.dim('  y / n · Enter for default · Esc cancel');
+			// Show the default explicitly in the footer so the user never has to
+			// cross-reference the (Y/n) hint on the previous line.
+			const line2 = c.dim(`  y / n · Enter = ${def ? 'yes' : 'no'} (default) · Esc cancel`);
 			const col = plainLen(line1) + 1;
 			process.stdout.write(`\r${CLEAR_DOWN}${line1}\n${line2}\x1b[1A\x1b[${col}G`);
 		};
@@ -386,8 +448,8 @@ export function select<T>(title: string, choices: Choice<T>[], opts: { initialIn
 			const lines = [c.bold(title)];
 			choices.forEach((choice, i) => {
 				const active = i === index;
-				const pointer = active ? c.cyan('❯') : ' ';
-				const label = active ? c.cyan(choice.label) : choice.label;
+				const pointer = active ? c.accent('❯') : ' ';
+				const label = active ? c.accent(choice.label) : choice.label;
 				const hint = choice.hint ? c.dim(`  ${choice.hint}`) : '';
 				lines.push(`${pointer} ${label}${hint}`);
 			});
@@ -515,24 +577,233 @@ export interface SessionHooks {
 	 * while this runs, then resumes. Resolve when done; throw to surface an error.
 	 */
 	addTunnel: () => Promise<void>;
-}
-
-function pluralTunnels(n: number): string {
-	return n === 1 ? '1 tunnel active' : `${n} tunnels active`;
+	/**
+	 * Run the interactive "forget a saved tunnel" flow (pick from saved
+	 * remotes/locals, confirm, drop from the store). The panel is suspended
+	 * while this runs, then resumes. Resolve when done; throw to surface an error.
+	 */
+	forgetSaved: () => Promise<void>;
 }
 
 /** Visible width of a string, ignoring ANSI colour escapes. */
-function plainLen(s: string): number {
+export function plainLen(s: string): number {
 	// eslint-disable-next-line no-control-regex -- matching the ESC (\x1b) in SGR codes is the point
 	return s.replace(/\x1b\[[0-9;]*m/g, '').length;
+}
+
+/** Right-pad `s` to `width` visible characters (ANSI-aware). */
+export function padEndPlain(s: string, width: number): string {
+	const pad = width - plainLen(s);
+	return pad > 0 ? s + ' '.repeat(pad) : s;
+}
+
+/** Left-pad `s` to `width` visible characters (ANSI-aware). */
+export function padStartPlain(s: string, width: number): string {
+	const pad = width - plainLen(s);
+	return pad > 0 ? ' '.repeat(pad) + s : s;
+}
+
+/**
+ * Truncate `s` to `width` characters, appending `…` when it overflows. Assumes
+ * `s` carries no ANSI codes (callers should colour after truncating).
+ */
+export function truncatePlain(s: string, width: number, ellipsis = '…'): string {
+	if (width <= 0) return '';
+	if (s.length <= width) return s;
+	if (width <= ellipsis.length) return ellipsis.slice(0, width);
+	return s.slice(0, width - ellipsis.length) + ellipsis;
+}
+
+/**
+ * Compute the box width and per-column widths used by {@link renderDashboard}.
+ * Pure so the layout can be unit-tested without driving a terminal.
+ *
+ * The row layout, inside the box, is:
+ *
+ *   `❯` (1) · space · `●` (1) · 2 spaces · name · 2 spaces · url
+ *
+ * The name column is sized to its widest entry; the URL column absorbs the
+ * remaining width (and is truncated with `…` if a single URL is longer than the
+ * terminal allows). Connection counts live in the status dot, not as a column.
+ */
+export function computeBoxLayout(
+	items: { name: string; url: string }[],
+	termCols: number
+): { boxWidth: number; nameWidth: number; urlWidth: number } {
+	const MIN_BOX = 50;
+	const MAX_BOX = 110;
+	const SIDE_MARGIN = 4; // 2-space indent left + 2-space safety right
+	const usableTerm = Math.max(MIN_BOX, termCols - SIDE_MARGIN);
+	const targetBox = Math.min(MAX_BOX, usableTerm);
+
+	const nameWidth = Math.max(1, ...items.map((i) => i.name.length));
+	const naturalUrl = Math.max(1, ...items.map((i) => i.url.length));
+
+	// Fixed (non-URL) inner content width:
+	//   ❯(1) + space(1) + ●(1) + 2 spaces + name + 2 spaces + →(1) + 2 spaces
+	// Plus the box's own 1-space padding on each side = +2 for the box.
+	const fixedNonUrl = 1 + 1 + 1 + 2 + nameWidth + 2 + 1 + 2;
+	const desiredBox = fixedNonUrl + 2 /* box padding */ + 2 /* border */ + naturalUrl;
+	const boxWidth = Math.max(MIN_BOX, Math.min(targetBox, desiredBox));
+
+	// What remains inside the box (between │ … │) minus the 2-space inner padding
+	// minus the fixed non-URL columns is the URL's room.
+	const innerWidth = boxWidth - 2 /* borders */ - 2 /* padding */;
+	const urlWidth = Math.max(8, innerWidth - fixedNonUrl);
+
+	return { boxWidth, nameWidth, urlWidth };
+}
+
+
+/**
+ * Format a tunnel's "main row": `❯ ● name  →  url`. The status dot signals
+ * health (connected / connecting / disconnected) and blinks at 1 Hz while the
+ * tunnel is in its "no connections yet" startup window.
+ */
+function formatTunnelRow(opts: {
+	selected: boolean;
+	healthy: boolean;
+	isConnecting: boolean;
+	blinkOn: boolean;
+	stoppingHighlight: boolean;
+	name: string;
+	url: string;
+	nameWidth: number;
+	urlWidth: number;
+}): string {
+	const caret = opts.selected ? c.accent('❯') : ' ';
+	const dot = opts.stoppingHighlight
+		? c.yellow('●')
+		: opts.healthy
+			? c.accent('●')
+			: opts.isConnecting
+				? (opts.blinkOn ? c.accent('●') : c.dim('○'))
+				: c.dim('○');
+	const namePadded = padEndPlain(opts.name, opts.nameWidth);
+	const nameColored = opts.selected ? c.bold(namePadded) : namePadded;
+	const urlTrunc = truncatePlain(opts.url, opts.urlWidth);
+	const urlColored = c.dim(urlTrunc);
+	return `${caret} ${dot}  ${nameColored}  ${c.dim('→')}  ${urlColored}`;
+}
+
+/**
+ * Render the whole dashboard frame (box + footer + optional flash). Pure so
+ * layout/colour decisions can be exercised by tests. The caller is responsible
+ * for taking a snapshot of `tk.list()` and supplying connection counts.
+ */
+export function renderDashboard(opts: {
+	tunnels: {
+		name: string;
+		type: string;
+		publicUrl: string;
+		connections: number;
+		routes: { hostname: string; service: string }[];
+		startedAt?: string;
+	}[];
+	cursor: number;
+	stopping: boolean;
+	flash: string;
+	termCols: number;
+	now?: number;
+}): string[] {
+	const lines: string[] = [];
+
+	if (opts.tunnels.length === 0) {
+		lines.push('');
+		lines.push(c.dim('   nothing running yet'));
+		lines.push(
+			c.dim('   press ') +
+				c.accent('n') +
+				c.dim(' to start · ') +
+				c.accent('f') +
+				c.dim(' forget a saved · ') +
+				c.accent('q') +
+				c.dim(' to quit')
+		);
+		return lines;
+	}
+
+	const items = opts.tunnels.map((t) => ({
+		name: t.name,
+		url: t.routes.length > 1 ? `${t.routes.length} routes` : t.publicUrl || '—'
+	}));
+	const nameWidth = Math.max(1, ...items.map((i) => i.name.length));
+	// urlWidth: terminal width minus indent(2) + caret+space(2) + dot+2sp(3) + name + arrow area(7)
+	const urlWidth = Math.max(8, opts.termCols - nameWidth - 14);
+
+	const now = opts.now ?? Date.now();
+	// Blink at 1 Hz (500ms on, 500ms off) while a freshly-started tunnel has
+	// no connections yet. After CONNECTING_WINDOW_MS the dot falls back to a
+	// steady `○` so a tunnel that's actually broken doesn't look "loading".
+	const blinkOn = Math.floor(now / 500) % 2 === 0;
+	const CONNECTING_WINDOW_MS = 30_000;
+
+	lines.push('');
+
+	opts.tunnels.forEach((t, i) => {
+		const item = items[i];
+		const selected = i === opts.cursor;
+		const healthy = t.connections > 0;
+		const stoppingHighlight = opts.stopping && selected;
+		const isConnecting =
+			!healthy && t.startedAt !== undefined && now - new Date(t.startedAt).getTime() < CONNECTING_WINDOW_MS;
+
+		lines.push(
+			'  ' +
+				formatTunnelRow({
+					selected,
+					healthy,
+					isConnecting,
+					blinkOn,
+					stoppingHighlight,
+					name: item.name,
+					url: item.url,
+					nameWidth,
+					urlWidth
+				})
+		);
+
+		// Multi-route: `- service → hostname` (local service first, then public
+		// hostname) so the direction reads the same as the tunnel flow.
+		if (t.routes.length > 1) {
+			for (const r of t.routes) {
+				const sub = truncatePlain(`${r.service}  →  ${r.hostname}`, urlWidth + nameWidth);
+				lines.push('  ' + c.dim(`       - ${sub}`));
+			}
+		}
+	});
+
+	if (opts.flash) {
+		lines.push('');
+		lines.push('   ' + c.accent2(opts.flash));
+	}
+
+	lines.push('');
+	lines.push(
+		'   ' +
+			c.accent('↑/↓') +
+			c.dim(' select   ') +
+			c.accent('n') +
+			c.dim(' new   ') +
+			c.accent('x') +
+			c.dim(' stop   ') +
+			c.accent('c') +
+			c.dim(' copy   ') +
+			c.accent('f') +
+			c.dim(' forget   ') +
+			c.accent('q') +
+			c.dim(' quit')
+	);
+
+	return lines;
 }
 
 /**
  * Persistent multi-tunnel control panel. Lists every tunnel `tk` is running with
  * a live status, lets you start more (`n`), stop the highlighted one (`x`), copy
- * its URL (`c`), and quit (`q` / Ctrl+C, stops everything). Without a TTY it
- * prints a static summary and idles until a signal — the old foreground
- * behaviour, so pipes and CI are unaffected.
+ * its URL (`c`), forget a saved one (`f`), and quit (`q` / Ctrl+C, stops
+ * everything). Without a TTY it prints a static summary and idles until a
+ * signal — the old foreground behaviour, so pipes and CI are unaffected.
  */
 export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	// --- Non-TTY: static summary of whatever is running, then idle on signals. ---
@@ -553,7 +824,6 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	// exactly as it was. Renders are painted from the home position each time.
 	process.stdout.write(ENTER_ALT + CURSOR_HIDE);
 
-	const startedAt = Date.now();
 	let cursor = 0;
 	// Starts suspended: nothing is drawn until begin() decides (panel or add flow).
 	let suspended = true;
@@ -573,57 +843,25 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		const tunnels = tk.list();
 		cursor = tunnels.length === 0 ? 0 : Math.min(Math.max(cursor, 0), tunnels.length - 1);
 
-		const nameWidth = Math.max(0, ...tunnels.map((t) => plainLen(t.name ?? t.service ?? t.id)));
+		const flash = Date.now() < flashUntil ? flashMsg : '';
+		const termCols = process.stdout.columns ?? 80;
 
-		const lines: string[] = [];
-		lines.push(
-			`${c.cyan('tunnelkit')} ${c.dim(`· ${pluralTunnels(tunnels.length)}`)}` +
-				c.dim(`   up ${formatUptime(Date.now() - startedAt)}`)
-		);
-		lines.push('');
-
-		if (tunnels.length === 0) {
-			lines.push(c.dim('  nothing running yet — press n to start a tunnel'));
-		} else {
-			tunnels.forEach((t, i) => {
-				const active = i === cursor;
-				const conns = t.connections;
-				const healthy = conns.length > 0;
-				const dot = stopping && active ? c.yellow('●') : healthy ? c.green('●') : c.dim('○');
-				const name = (t.name ?? t.service ?? t.id).padEnd(nameWidth);
-				const label = active ? c.bold(name) : name;
-				// Routes a remote/local tunnel actually serves (skip the catch-all rule).
-				const routes = (t.ingress ?? []).filter((r): r is IngressInfo & { hostname: string } => !!r.hostname);
-				const locs = conns.map((conn) => conn.location);
-				const connStr = conns.length > 0
-					? c.dim(`  ${conns.length} conn${conns.length === 1 ? '' : 's'}${locs.length ? ` ${locs.join(',')}` : ''}`)
-					: '';
-				// Header: a single URL when there's one route; a route count when there
-				// are many (each one is then listed below, so don't repeat it here).
-				const head = routes.length > 1
-					? c.dim(`${routes.length} routes`)
-					: t.publicUrl
-						? c.cyan(t.publicUrl)
-						: c.dim(t.type === 'quick' ? '…' : 'waiting for ingress…');
-				lines.push(`${active ? c.cyan('❯') : ' '} ${dot} ${c.dim(t.type.padEnd(6))} ${label}  ${head}${connStr}`);
-				// List every hostname → service mapping in an aligned column so all the
-				// dashboard- or config-defined services are visible at a glance.
-				if (routes.length > 1) {
-					const hostWidth = Math.max(...routes.map((r) => r.hostname.length));
-					for (const r of routes) lines.push(c.dim(`      ${r.hostname.padEnd(hostWidth)}  →  ${r.service}`));
-				}
-			});
-		}
-
-		if (Date.now() < flashUntil && flashMsg) {
-			lines.push('');
-			lines.push(`  ${c.green(flashMsg)}`);
-		}
-
-		lines.push('');
-		lines.push(c.dim(tunnels.length > 0
-			? '  ↑/↓ select · n new · x stop · c copy URL · q quit'
-			: '  n new tunnel · q quit'));
+		const lines = renderDashboard({
+			tunnels: tunnels.map((t) => ({
+				name: t.name ?? t.service ?? t.id,
+				type: t.type,
+				publicUrl: t.publicUrl,
+				connections: t.connections.length,
+				routes: (t.ingress ?? [])
+					.filter((r): r is IngressInfo & { hostname: string } => !!r.hostname)
+					.map((r) => ({ hostname: r.hostname, service: r.service })),
+				startedAt: t.startedAt
+			})),
+			cursor,
+			stopping,
+			flash,
+			termCols
+		});
 
 		// Repaint from the top of the (alternate) screen, clearing whatever was
 		// below — so the panel never stacks and old frames never linger.
@@ -653,7 +891,10 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	const resume = (): void => {
 		suspended = false;
 		dispose = readKeys(onKey);
-		ticker = setInterval(render, 1000);
+		// 2 Hz (500ms) ticker matches the blink phase length (500ms on/off) so
+		// each tick flips the blink state exactly once. Status-changed events
+		// trigger immediate repaints so the ticker is only for the animation.
+		ticker = setInterval(render, 500);
 		render();
 	};
 
@@ -661,6 +902,19 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		suspend();
 		try {
 			await hooks.addTunnel();
+		} catch (error) {
+			if (!(error instanceof CancelError)) {
+				errLine(c.red(`  ${error instanceof Error ? error.message : String(error)}`));
+			}
+		} finally {
+			resume();
+		}
+	};
+
+	const forgetAndResume = async (): Promise<void> => {
+		suspend();
+		try {
+			await hooks.forgetSaved();
 		} catch (error) {
 			if (!(error instanceof CancelError)) {
 				errLine(c.red(`  ${error instanceof Error ? error.message : String(error)}`));
@@ -704,8 +958,62 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		process.stdout.write(LEAVE_ALT + CURSOR_SHOW);
 	};
 
-	const quit = async (): Promise<void> => {
+	/**
+	 * Stop a single tunnel after confirming when it has live connections. With
+	 * zero connections a stop just yanks a quiet tunnel — no prompt needed. With
+	 * ≥1 connection, "stop" also kills in-flight traffic, so we ask first.
+	 */
+	const stopWithConfirm = async (t: ActiveTunnel): Promise<void> => {
+		if (t.connections.length === 0) {
+			setFlash(`stopped ${t.name ?? t.service ?? t.id}`);
+			void tk.stop(t.id).then(render);
+			return;
+		}
+		suspend();
+		let ok = false;
+		try {
+			ok = await confirm(
+				`Stop "${t.name ?? t.service ?? t.id}"? It has ${t.connections.length} active connection${t.connections.length === 1 ? '' : 's'}.`,
+				{ default: false }
+			);
+		} catch {
+			// Esc/Ctrl+C from the confirm prompt — just resume the panel.
+		}
+		if (ok) {
+			setFlash(`stopped ${t.name ?? t.service ?? t.id}`);
+			void tk.stop(t.id).then(render);
+		}
+		resume();
+	};
+
+	/**
+	 * Quit the panel. With `confirmIfActive: true` and any live connections, ask
+	 * before tearing everything down — used by the panel's `q` / Ctrl+C. SIGTERM
+	 * is an external kill and skips the prompt.
+	 */
+	const quit = async (opts: { confirmIfActive?: boolean } = {}): Promise<void> => {
 		if (stopping) return;
+		if (opts.confirmIfActive) {
+			const tunnels = tk.list();
+			const totalCount = tunnels.length;
+			const activeCount = tunnels.filter((t) => t.connections.length > 0).length;
+			if (activeCount > 0) {
+				suspend();
+				let ok = false;
+				try {
+					ok = await confirm(
+						`Stop all ${totalCount} tunnel${totalCount === 1 ? '' : 's'} (${activeCount} with active connections) and quit?`,
+						{ default: false }
+					);
+				} catch {
+					// cancelled
+				}
+				if (!ok) {
+					resume();
+					return;
+				}
+			}
+		}
 		stopping = true;
 		suspended = true;
 		leave();
@@ -717,21 +1025,22 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	function onKey(key: Key): void {
 		if (suspended) return;
 		if (key.type === 'ctrl-c' || (key.type === 'char' && key.value === 'q')) {
-			void quit();
+			void quit({ confirmIfActive: true });
 			return;
 		}
 		if (key.type === 'char' && key.value === 'n') {
 			void addAndResume();
 			return;
 		}
+		if (key.type === 'char' && key.value === 'f') {
+			void forgetAndResume();
+			return;
+		}
 		const tunnels = tk.list();
 		if (tunnels.length === 0) return;
 		const current = tunnels[cursor];
 		if (key.type === 'char' && (key.value === 'x' || key.value === 'd')) {
-			if (current) {
-				setFlash(`stopped ${current.name ?? current.service ?? current.id}`);
-				void tk.stop(current.id).then(render);
-			}
+			if (current) void stopWithConfirm(current);
 			return;
 		}
 		if (key.type === 'char' && key.value === 'c') {
@@ -748,10 +1057,13 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	// One process-level SIGINT listener for the whole session. It prevents Node's
 	// default hard-kill, but no-ops while suspended so Ctrl+C during a wizard
 	// prompt cancels only that prompt (handled by prompt/select) instead of
-	// tearing everything down. In the panel itself Ctrl+C arrives as a key.
+	// tearing everything down. In the panel itself Ctrl+C arrives as a key, so
+	// this is a safety net for stray external SIGINTs.
 	process.on('SIGINT', () => {
-		if (!suspended) void quit();
+		if (!suspended) void quit({ confirmIfActive: true });
 	});
+	// SIGTERM is an external kill (e.g. `kill <pid>`) — don't gate it on a
+	// confirm prompt the user can't see.
 	process.on('SIGTERM', () => void quit());
 
 	// With nothing running yet, skip the empty panel and go straight to the

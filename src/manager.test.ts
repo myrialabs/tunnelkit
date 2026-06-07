@@ -12,7 +12,7 @@ describe('TunnelKit store option', () => {
 	it('exposes a default TunnelStore at dataDir', () => {
 		const tk = new TunnelKit({ dataDir: dir });
 		expect(tk.store).toBeInstanceOf(TunnelStore);
-		expect(tk.store?.path).toBe(join(dir, 'config.json'));
+		expect(tk.store.path).toBe(join(dir, 'config.json'));
 	});
 
 	it('keeps the default store with store: true', () => {
@@ -20,9 +20,12 @@ describe('TunnelKit store option', () => {
 		expect(tk.store).toBeInstanceOf(TunnelStore);
 	});
 
-	it('disables persistence with store: false', () => {
+	it('returns a noop TunnelStore with store: false', () => {
 		const tk = new TunnelKit({ dataDir: dir, store: false });
-		expect(tk.store).toBeNull();
+		expect(tk.store).toBeInstanceOf(TunnelStore);
+		// noop store reads empty and writes nothing
+		expect(tk.store.getRemotes()).toEqual([]);
+		expect(tk.store.path).toBe('');
 	});
 
 	it('uses a caller-supplied store instance (advanced)', () => {
@@ -66,23 +69,23 @@ describe('TunnelKit isTunnelKnown default', () => {
 	});
 });
 
-describe('TunnelKit.ensureBinary', () => {
-	it('returns the managed path without downloading when one already exists', async () => {
+describe('TunnelKit.bin', () => {
+	it('bin.ensure() returns the managed path without downloading when one already exists', async () => {
 		const dataDir = join(dir, 'ensure-binary-existing');
 		const installDir = join(dataDir, 'bin');
 		const binaryName = platform() === 'win32' ? 'cloudflared.exe' : 'cloudflared';
 		const binaryPath = join(installDir, binaryName);
 		// Drop a fake binary file so resolveCloudflaredBinary finds it before the
-		// PATH fallback. ensureBinary() should not try to install over it.
+		// PATH fallback. bin.ensure() should not try to install over it.
 		if (!existsSync(installDir)) {
 			mkdirSync(installDir, { recursive: true });
 		}
 		writeFileSync(binaryPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
 
 		const tk = new TunnelKit({ dataDir, installDir });
-		const resolved = await tk.ensureBinary();
+		const resolved = await tk.bin.ensure();
 		expect(resolved).toBe(binaryPath);
-		expect(tk.getBinaryStatus().installed).toBe(true);
+		expect(tk.bin.status().installed).toBe(true);
 	});
 });
 

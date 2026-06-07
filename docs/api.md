@@ -40,17 +40,17 @@ itself.
 | `logger` | `Logger` | silent | `{ log?, warn?, error? }`; pass `console` for output. |
 | `quickTimeoutMs` | `number` | `30000` | Timeout waiting for a quick-tunnel URL. |
 | `connectTimeoutMs` | `number` | `60000` | Timeout waiting for remote/local connection. |
-| `isTunnelKnown` | `(tunnelId: string) => boolean` | `() => false`, or store-aware when a `TunnelStore` is configured | Guards named tunnels you track from orphan cleanup during `create`. |
-| `store` | `boolean \| TunnelStore` | `true` | Persist started tunnels. `true`/omit = auto-save under `dataDir`; `false` = off; a `TunnelStore` = bring your own instance. |
+| `isTunnelKnown` | `(tunnelId: string) => boolean` | store-aware (checks `getLocals()`) | Guards named tunnels you track from orphan cleanup during `create`. |
+| `store` | `boolean \| TunnelStore` | `true` | Persist started tunnels. `true`/omit = auto-save under `dataDir`; `false` = noop (reads empty, writes skipped); a `TunnelStore` = bring your own instance. |
 
-### Binary methods
+### Binary — `tk.bin`
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `ensureBinary()` | `Promise<string>` | Resolve a usable `cloudflared`, downloading the managed copy on first use. Idempotent. |
-| `isBinaryInstalled()` | `boolean` | Whether a managed binary exists in `installDir`. |
-| `getBinaryStatus()` | `BinaryStatus` | `{ installed, version, path }`. |
-| `installBinary(version?)` | `Promise<string>` | Download cloudflared; returns its path. |
+| `tk.bin.ensure()` | `Promise<string>` | Resolve a usable `cloudflared`, downloading on first use. Returns its path. |
+| `tk.bin.isInstalled()` | `boolean` | Whether a managed binary exists in `installDir`. |
+| `tk.bin.status()` | `BinaryStatus` | `{ installed, version, path }`. |
+| `tk.bin.install(version?)` | `Promise<string>` | Download cloudflared into `installDir`; returns its path. |
 
 ### Quick tunnel — `tk.quick`
 
@@ -85,6 +85,8 @@ tk.local.cancelLogin(): void
 tk.local.logout(): { success: boolean }
 
 // Named tunnel management (Cloudflare account)
+tk.local.prepare(opts: { id: string; hostname: string; service: string })
+  : Promise<LocalTunnelConfig>             // find saved config, or create + routeDns + save
 tk.local.create(name: string): Promise<{ tunnelId: string; credentialsFile: string }>
 tk.local.delete(tunnelId: string, credentialsFile?: string): Promise<void>
 tk.local.cleanupFiles(tunnelId: string): void
@@ -110,19 +112,18 @@ tk.local.isActive(id: string): boolean
 ### Persistence
 
 ```ts
-tk.store               // TunnelStore | null — null when store: false
+tk.store               // TunnelStore
 ```
 
-Remote and local tunnels are auto-saved on start (quick tunnels are not). Read them back to restore
-on startup: `for (const r of tk.store?.getRemotes() ?? []) await tk.remote.start(r)`. See
-[`TunnelStore`](#tunnelstore).
+Remote and local tunnels are auto-saved on start (quick tunnels are not). Read them back with `tk.restoreAll()`. See [`TunnelStore`](#tunnelstore).
 
 ### Status & lifecycle
 
 ```ts
-tk.list(): ActiveTunnel[]            // every tunnel this manager is running, all modes
-tk.stop(id: string): Promise<void>   // stop a single tunnel by id
-tk.stopAll(): Promise<void>          // stop every managed tunnel
+tk.list(): ActiveTunnel[]                              // every running tunnel, all modes
+tk.stop(id: string): Promise<void>                     // stop a single tunnel by id
+tk.stopAll(): Promise<void>                            // stop every managed tunnel
+tk.restoreAll(): Promise<{ remotes: number; locals: number }>  // start all saved tunnels
 ```
 
 To list named tunnels on your Cloudflare account (not just the running ones), use

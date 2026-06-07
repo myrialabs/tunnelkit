@@ -65,7 +65,7 @@ tunnelkit · 3 tunnels active   up 04:12
       shop.example.com   →  http://localhost:4000
       cms.example.com    →  http://localhost:4001
 
-  ↑/↓ select · n new · x stop · c copy URL · q quit
+  ↑/↓ select · n new · x stop · c copy URL · f forget · q quit
 ```
 
 | Key | Action |
@@ -74,6 +74,7 @@ tunnelkit · 3 tunnels active   up 04:12
 | `n` | Start another tunnel — opens a mode wizard (Quick / Remote / Local / a saved one) |
 | `x` | Stop the selected tunnel; the others keep running |
 | `c` | Copy the selected tunnel's URL to the clipboard |
+| `f` | Forget a saved tunnel (drops it from the local store; Cloudflare itself is untouched) |
 | `q` / `Ctrl+C` | Stop **all** tunnels and exit |
 
 Pressing `n` opens a wizard (mode → prompts for port / token / routes); `Esc` steps back one level
@@ -213,16 +214,19 @@ tunnelkit local delete 6d8e…-uuid
 ### `saved` / `forget`
 
 `saved` lists tunnels saved locally for reuse — remote tokens and local tunnel configs. `forget`
-removes a single entry by name. Neither command touches Cloudflare; they operate on the local store
-only (`<dataDir>/config.json`).
+removes a single entry by name. Remote tokens are dashboard-managed, so forgetting one only drops
+the local copy of the token. **For local tunnels, `forget` also DELETES the tunnel from
+Cloudflare** (irreversible) — it requires Cloudflare auth, confirms in a terminal, and `--yes`
+skips the confirm.
 
 ```sh
-tunnelkit saved            # list all saved remote + local tunnels
-tunnelkit forget prod      # remove the saved "prod" entry
+tunnelkit saved                  # list all saved remote + local tunnels
+tunnelkit forget prod            # remote: drop the saved token
+tunnelkit forget storefront      # local: drop the local entry + delete from Cloudflare
+tunnelkit forget prod --yes      # skip the confirmation prompt
 ```
 
-To also delete a named tunnel from Cloudflare, use [`local delete`](#local-delete). Use `--no-save`
-on any run to skip the store entirely.
+Use `--no-save` on any run to skip the store entirely.
 
 ### `dashboard`
 

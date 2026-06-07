@@ -27,8 +27,8 @@ export interface ManagerContext {
 	readonly connectTimeoutMs: number;
 	/** Predicate used during name-conflict recovery (see TunnelKitOptions). */
 	readonly isTunnelKnown: (tunnelId: string) => boolean;
-	/** The persistence store backing auto-save, or `null` when disabled. */
-	readonly store: TunnelStore | null;
+	/** The persistence store backing auto-save. */
+	readonly store: TunnelStore;
 	/** Path to the origin certificate this manager uses. */
 	readonly certPath: string;
 	/** cloudflared's default cert location, migrated into `dataDir` on first use. */

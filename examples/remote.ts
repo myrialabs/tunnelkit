@@ -19,7 +19,7 @@ if (!token) {
 
 const tk = new TunnelKit({ logger: console });
 
-await tk.ensureBinary();
+await tk.bin.ensure();
 
 tk.on('ingress-update', ({ id, ingress }) => {
 	console.log(`[${id}] ingress updated:`, ingress);

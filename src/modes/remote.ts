@@ -90,7 +90,7 @@ export class RemoteMode {
 
 		timings.tunnelStart = Date.now() - startTime;
 		this.tunnels.set(opts.id, handle);
-		this.ctx.store?.upsertRemote(opts.id, name, opts.token);
+		this.ctx.store.upsertRemote(opts.id, name, opts.token);
 
 		this.ctx.log.log(`Remote tunnel started: ${name}`);
 		onProgress?.('connected', { timings });

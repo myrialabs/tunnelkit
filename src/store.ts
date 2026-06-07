@@ -32,25 +32,33 @@ export interface TunnelStoreOptions {
 	dataDir?: string;
 	/** Optional logger; silent when omitted. */
 	logger?: Logger;
+	/**
+	 * When `true`, all reads return empty results and all writes are silently
+	 * skipped — no file is ever touched. Used when persistence is disabled.
+	 */
+	noop?: boolean;
 }
 
 export class TunnelStore {
 	private readonly file: string;
 	private readonly dir: string;
 	private readonly log: Required<Logger>;
+	private readonly _noop: boolean;
 
 	constructor(options: TunnelStoreOptions = {}) {
+		this._noop = options.noop === true;
 		this.dir = options.dataDir ?? join(homedir(), '.tunnelkit');
 		this.file = join(this.dir, 'config.json');
 		this.log = resolveLogger(options.logger);
 	}
 
-	/** Absolute path to the backing JSON file. */
+	/** Absolute path to the backing JSON file, or `''` when noop. */
 	get path(): string {
-		return this.file;
+		return this._noop ? '' : this.file;
 	}
 
 	private read(): StoreFile {
+		if (this._noop) return { remotes: [], locals: [] };
 		try {
 			if (!existsSync(this.file)) return { remotes: [], locals: [] };
 			const data = JSON.parse(readFileSync(this.file, 'utf-8'));
@@ -66,6 +74,7 @@ export class TunnelStore {
 	}
 
 	private write(data: StoreFile): void {
+		if (this._noop) return;
 		if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
 		// The store can hold tunnel tokens — keep it readable only by the owner.
 		// `mode` on writeFileSync only applies when the file is first created, so
