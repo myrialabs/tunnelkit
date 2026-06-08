@@ -1,4 +1,8 @@
-<h1 align="center">tunnelkit</h1>
+<p align="center">
+  <img src="https://tunnelkit.myrialabs.dev/favicon.svg" alt="TunnelKit" width="72" height="72" />
+</p>
+
+<h1 align="center">TunnelKit</h1>
 
 <p align="center">
   <strong>Cloudflare Tunnels for Node &amp; Bun.</strong><br />
@@ -22,7 +26,7 @@
 
 ---
 
-tunnelkit wraps the `cloudflared` binary and gives you a typed, managed API over Cloudflare's three
+TunnelKit wraps the `cloudflared` binary and gives you a typed, managed API over Cloudflare's three
 tunnel modes. It downloads and drives the binary for you, so you can expose a local service to the
 internet in a few lines.
 
@@ -43,7 +47,7 @@ npm i -g tunnelkit      # or: bun add -g tunnelkit
 tunnelkit quick 3000    # → https://random-words.trycloudflare.com
 ```
 
-## Why tunnelkit
+## Why TunnelKit
 
 - **All three modes, first-class** — Quick, Remote (token), and Local (named), each behind its own namespace.
 - **Fully typed, including events** — `TunnelKit` and `CloudflaredTunnel` are typed `EventEmitter`s.
@@ -77,7 +81,7 @@ bun add -g tunnelkit       # or globally, for the CLI
 # npm install tunnelkit / npm i -g tunnelkit
 ```
 
-You also need the `cloudflared` binary. tunnelkit can download it (`tk.bin.ensure()` /
+You also need the `cloudflared` binary. TunnelKit can download it (`tk.bin.ensure()` /
 `tunnelkit install`), or use one already on your `PATH` (brew/apt/winget).
 
 ## The three modes
@@ -210,7 +214,7 @@ store.addLocalIngress(id, 'app.example.com', 'http://localhost:3000');
 
 ## Binary management
 
-Everything shells out to `cloudflared`. tunnelkit resolves it from the managed `installDir` (default
+Everything shells out to `cloudflared`. TunnelKit resolves it from the managed `installDir` (default
 `~/.tunnelkit/bin`), then from `PATH`. The library never downloads on its own — you call
 `tk.bin.ensure()` when you want it. (The CLI downloads automatically on first use.)
 
@@ -243,15 +247,15 @@ outside your app's data.
 
 ## How is this different from `cloudflared`?
 
-tunnelkit doesn't replace the `cloudflared` binary — it *drives* it, replacing the wrapper layer.
+TunnelKit doesn't replace the `cloudflared` binary — it *drives* it, replacing the wrapper layer.
 
-**vs. the `cloudflared` CLI:** you could shell out and parse logs yourself; tunnelkit removes that
+**vs. the `cloudflared` CLI:** you could shell out and parse logs yourself; TunnelKit removes that
 glue — typed API, URL/connection promises, timeouts, auto-stop, a multi-tunnel registry, and live
 events.
 
 **vs. the [`cloudflared` npm package](https://www.npmjs.com/package/cloudflared):**
 
-| | `cloudflared` npm | tunnelkit |
+| | `cloudflared` npm | TunnelKit |
 | --- | --- | --- |
 | Quick tunnels | ✅ | ✅ |
 | Token / config tunnels | pass flags yourself | first-class `tk.remote.start` / `tk.local.start` |
@@ -260,11 +264,10 @@ events.
 | `config.yml` generation + orphan recovery | ❌ | ✅ |
 | Built-in persistence | ❌ | ✅ `TunnelStore` (default-on) |
 | Typed events end-to-end | partial | ✅ |
-| Dependencies | has runtime deps | **zero** |
 | Runtime | Node | Node 18+ **and** Bun |
 
 For **building an app that creates, runs, monitors, and persists tunnels across all three modes**,
-use tunnelkit. (Capabilities reflect the projects as of writing.)
+use TunnelKit. (Capabilities reflect the projects as of writing.)
 
 ## Low-level API
 
@@ -284,7 +287,7 @@ Static commands: `CloudflaredTunnel.login`, `.createTunnel`, `.deleteTunnel`, `.
 
 ## Graceful shutdown
 
-tunnelkit never installs process hooks for you. Stop tunnels on exit yourself:
+TunnelKit never installs process hooks for you. Stop tunnels on exit yourself:
 
 ```ts
 const shutdown = async () => { await tk.stopAll(); process.exit(0); };
@@ -308,7 +311,7 @@ bun run examples/quick.ts 3000
 
 ## Support
 
-If tunnelkit is useful to you, consider supporting its development:
+If TunnelKit is useful to you, consider supporting its development:
 
 | Method | Address / Link |
 |--------|----------------|
