@@ -91,7 +91,7 @@ export async function performLogin(tk: TunnelKit): Promise<void> {
 				onError: (message) => reject(new Error(message))
 			});
 		});
-		out(c.green('\n✓ Logged in. Origin certificate saved.'));
+		out(c.accent('\n✓ Logged in. Origin certificate saved.'));
 	} finally {
 		process.removeListener('SIGINT', onSig);
 	}
@@ -108,13 +108,13 @@ export async function startQuick(tk: TunnelKit, service: string, autoStopMinutes
 	const started = await runCancelable(`Starting quick tunnel for ${service}…`, (signal) =>
 		tk.quick.start({ service, autoStopMinutes, signal })
 	);
-	out(`${c.green('✓')} ${c.accent('quick')} ${c.dim('·')} ${c.url(started.publicUrl)}`);
+	out(`${c.accent('✓')} ${c.accent('quick')} ${c.dim('·')} ${c.url(started.publicUrl)}`);
 }
 
 export async function startRemote(tk: TunnelKit, opts: { id: string; token: string; name?: string; silent?: boolean }): Promise<void> {
 	await ensureBinary(tk);
 	await runCancelable('Starting remote tunnel…', (signal) => tk.remote.start({ ...opts, signal }));
-	if (!opts.silent) out(`${c.green('✓')} ${c.accent('remote')} ${c.dim('·')} ${c.bold(opts.name ?? opts.id)}`);
+	if (!opts.silent) out(`${c.accent('✓')} ${c.accent('remote')} ${c.dim('·')} ${c.bold(opts.name ?? opts.id)}`);
 }
 
 export async function startLocalNew(
@@ -150,7 +150,7 @@ export async function startLocalNew(
 	await runCancelable('Starting local tunnel…', (signal) =>
 		tk.local.start({ id: name, name, tunnelId: created.tunnelId, credentialsFile: created.credentialsFile, ingress: routes }, undefined, { signal })
 	);
-	if (!opts.silent) out(`${c.green('✓')} ${c.accent('local')} ${c.dim('·')} ${c.bold(name)}`);
+	if (!opts.silent) out(`${c.accent('✓')} ${c.accent('local')} ${c.dim('·')} ${c.bold(name)}`);
 }
 
 export async function startLocalSaved(
@@ -163,7 +163,7 @@ export async function startLocalSaved(
 	await runCancelable(`Starting saved tunnel "${name}"…`, (signal) =>
 		tk.local.start({ id: name, name, tunnelId: previous.tunnelId, credentialsFile: previous.credentialsFile, ingress: previous.ingress }, undefined, { signal })
 	);
-	out(`${c.green('✓')} ${c.accent('local')} ${c.dim('·')} ${c.bold(name)}`);
+	out(`${c.accent('✓')} ${c.accent('local')} ${c.dim('·')} ${c.bold(name)}`);
 }
 
 // --- Input validation ---

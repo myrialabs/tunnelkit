@@ -112,7 +112,7 @@ async function cmdLogin(parsed: ParsedArgs): Promise<void> {
 	await ensureBinary(tk);
 
 	if (tk.local.checkAuth().authenticated) {
-		out(c.green('✓ Already authenticated with Cloudflare.'));
+		out(c.accent('✓ Already authenticated with Cloudflare.'));
 		return;
 	}
 	await performLogin(tk);
@@ -121,7 +121,7 @@ async function cmdLogin(parsed: ParsedArgs): Promise<void> {
 function cmdLogout(parsed: ParsedArgs): void {
 	const tk = makeKit(parsed);
 	const { success } = tk.local.logout();
-	out(success ? c.green('✓ Logged out (certificate removed).') : c.yellow('Nothing to remove.'));
+	out(success ? c.accent('✓ Logged out (certificate removed).') : c.yellow('Nothing to remove.'));
 }
 
 async function cmdList(parsed: ParsedArgs): Promise<void> {
@@ -170,7 +170,7 @@ async function cmdDelete(parsed: ParsedArgs): Promise<void> {
 		spin.stop();
 		throw error;
 	}
-	spin.stop(c.green(`✓ Deleted ${target}.`));
+	spin.stop(c.accent(`✓ Deleted ${target}.`));
 
 	const store = tk.store;
 	const saved = store.getLocals().find((l) => l.name === target || l.id === target);
@@ -237,7 +237,7 @@ async function cmdForget(parsed: ParsedArgs): Promise<void> {
 	if (remote) {
 		store.removeRemote(remote.id);
 		out(
-			c.green(`✓ Forgot remote "${target}".`) +
+			c.accent(`✓ Forgot remote "${target}".`) +
 				`\n${c.dim(`  (Cloudflare tunnel is dashboard-managed and untouched.)`)}`
 		);
 	} else {
@@ -253,7 +253,7 @@ async function cmdForget(parsed: ParsedArgs): Promise<void> {
 			spin.stop();
 		}
 		store.removeLocal(local!.id);
-		out(c.green(`✓ Forgot local "${target}" — removed from Cloudflare and the local store.`));
+		out(c.accent(`✓ Forgot local "${target}" — removed from Cloudflare and the local store.`));
 	}
 }
 
@@ -263,7 +263,7 @@ async function cmdInstall(parsed: ParsedArgs): Promise<void> {
 	const spin = spinner(`Downloading cloudflared ${version}…`);
 	try {
 		const path = await tk.bin.install(version);
-		spin.stop(`${c.green('✓')} Installed to ${c.dim(path)}`);
+		spin.stop(`${c.accent('✓')} Installed to ${c.dim(path)}`);
 	} catch (error) {
 		spin.stop();
 		throw error;
@@ -278,7 +278,7 @@ function cmdStatus(parsed: ParsedArgs): void {
 		out(c.dim('           run `tunnelkit install` to download it'));
 		return;
 	}
-	out(`  ${c.dim('binary')}   ${c.green('cloudflared')} ${status.version ?? 'unknown version'}`);
+	out(`  ${c.dim('binary')}   ${c.accent('cloudflared')} ${status.version ?? 'unknown version'}`);
 	out(`  ${c.dim('path')}     ${c.dim(status.path ?? '')}`);
 }
 

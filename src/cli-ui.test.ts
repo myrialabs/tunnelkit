@@ -180,9 +180,10 @@ describe('renderDashboard', () => {
 		const lines = renderDashboard({ tunnels: [], cursor: 0, stopping: false, flash: '', termCols: 100 });
 		const joined = lines.join('\n');
 		expect(joined).toContain('nothing running yet');
-		expect(joined).toContain('press');
-		// Empty state should still advertise the `f` keybinding so users discover it.
-		expect(joined).toMatch(/f.*forget/);
+		// Empty state shows the full footer so all keybindings are always discoverable.
+		expect(joined).toMatch(/m.*manage/);
+		expect(joined).toMatch(/n.*new/);
+		expect(joined).toMatch(/q.*quit/);
 		// No box should be drawn when there is nothing to box.
 		expect(joined).not.toContain('┌');
 		expect(joined).not.toContain('└');
@@ -241,7 +242,7 @@ describe('renderDashboard', () => {
 		expect(joined).toMatch(/select/);
 		expect(joined).toMatch(/x.*stop/);
 		expect(joined).toMatch(/c.*copy/);
-		expect(joined).toMatch(/f.*forget/);
+		expect(joined).toMatch(/m.*manage/);
 		expect(joined).toMatch(/q.*quit/);
 		// ↑/↓ should appear before `n new` per the latest UX request.
 		const selectIdx = joined.search(/↑\/↓/);

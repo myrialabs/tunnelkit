@@ -318,7 +318,7 @@ export function prompt(question: string, opts: PromptOptions = {}): Promise<stri
 		const finish = (v: string): void => {
 			dispose();
 			const shown = v ? c.bold(masked(v)) : c.dim('—');
-			process.stdout.write(`\r${CLEAR_DOWN}${c.green('✓')} ${question}: ${shown}\n`);
+			process.stdout.write(`\r${CLEAR_DOWN}${c.accent('✓')} ${question}: ${shown}\n`);
 		};
 
 		const submit = (): void => {
@@ -393,7 +393,7 @@ export function confirm(question: string, opts: { default?: boolean } = {}): Pro
 		// history; cancelling (Esc) still erases.
 		const finish = (val: boolean): void => {
 			dispose();
-			process.stdout.write(`\r${CLEAR_DOWN}${c.green('✓')} ${question} ${c.bold(val ? 'yes' : 'no')}\n`);
+			process.stdout.write(`\r${CLEAR_DOWN}${c.accent('✓')} ${question} ${c.bold(val ? 'yes' : 'no')}\n`);
 		};
 
 		const dispose = rawInput((chunk) => {
@@ -475,7 +475,7 @@ export function select<T>(title: string, choices: Choice<T>[], opts: { initialIn
 			dispose();
 			if (rendered > 0) process.stdout.write(`\x1b[${rendered}A${CLEAR_DOWN}`);
 			rendered = 0;
-			process.stdout.write(`${CURSOR_SHOW}${c.green('✓')} ${title}: ${c.bold(choices[index].label)}\n`);
+			process.stdout.write(`${CURSOR_SHOW}${c.accent('✓')} ${title}: ${c.bold(choices[index].label)}\n`);
 		};
 
 		const dispose = readKeys((key) => {
@@ -578,11 +578,11 @@ export interface SessionHooks {
 	 */
 	addTunnel: () => Promise<void>;
 	/**
-	 * Run the interactive "forget a saved tunnel" flow (pick from saved
-	 * remotes/locals, confirm, drop from the store). The panel is suspended
+	 * Run the interactive "manage saved tunnels" flow (pick from saved
+	 * remotes/locals, then edit token/routes or forget). The panel is suspended
 	 * while this runs, then resumes. Resolve when done; throw to surface an error.
 	 */
-	forgetSaved: () => Promise<void>;
+	manageSaved: () => Promise<void>;
 }
 
 /** Visible width of a string, ignoring ANSI colour escapes. */
@@ -711,21 +711,11 @@ export function renderDashboard(opts: {
 	if (opts.tunnels.length === 0) {
 		lines.push('');
 		lines.push(c.dim('   nothing running yet'));
-		lines.push(
-			c.dim('   press ') +
-				c.accent('n') +
-				c.dim(' to start · ') +
-				c.accent('f') +
-				c.dim(' forget a saved · ') +
-				c.accent('q') +
-				c.dim(' to quit')
-		);
-		return lines;
 	}
 
 	const items = opts.tunnels.map((t) => ({
 		name: t.name,
-		url: t.routes.length > 1 ? `${t.routes.length} routes` : t.publicUrl || '—'
+		url: t.routes.length >= 1 ? `${t.routes.length} route${t.routes.length === 1 ? '' : 's'}` : t.publicUrl || '—'
 	}));
 	const nameWidth = Math.max(1, ...items.map((i) => i.name.length));
 	// urlWidth: terminal width minus indent(2) + caret+space(2) + dot+2sp(3) + name + arrow area(7)
@@ -763,9 +753,11 @@ export function renderDashboard(opts: {
 				})
 		);
 
-		// Multi-route: `- service → hostname` (local service first, then public
+		// Subroutes: `- service → hostname` (local service first, then public
 		// hostname) so the direction reads the same as the tunnel flow.
-		if (t.routes.length > 1) {
+		// Shown for any tunnel with at least one named route (remote/local);
+		// quick tunnels have no routes so they always show the URL inline.
+		if (t.routes.length >= 1) {
 			for (const r of t.routes) {
 				const sub = truncatePlain(`${r.service}  →  ${r.hostname}`, urlWidth + nameWidth);
 				lines.push('  ' + c.dim(`       - ${sub}`));
@@ -789,8 +781,8 @@ export function renderDashboard(opts: {
 			c.dim(' stop   ') +
 			c.accent('c') +
 			c.dim(' copy   ') +
-			c.accent('f') +
-			c.dim(' forget   ') +
+			c.accent('m') +
+			c.dim(' manage   ') +
 			c.accent('q') +
 			c.dim(' quit')
 	);
@@ -809,7 +801,7 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 	// --- Non-TTY: static summary of whatever is running, then idle on signals. ---
 	if (!process.stdout.isTTY) {
 		for (const t of tk.list()) {
-			if (t.publicUrl) out(`\n  ${c.green('●')} ${c.bold(t.publicUrl)}`);
+			if (t.publicUrl) out(`\n  ${c.accent('●')} ${c.bold(t.publicUrl)}`);
 			for (const rule of t.ingress ?? []) {
 				if (rule.hostname) out(c.dim(`    ${rule.hostname} → ${rule.service}`));
 			}
@@ -911,10 +903,10 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 		}
 	};
 
-	const forgetAndResume = async (): Promise<void> => {
+	const manageAndResume = async (): Promise<void> => {
 		suspend();
 		try {
-			await hooks.forgetSaved();
+			await hooks.manageSaved();
 		} catch (error) {
 			if (!(error instanceof CancelError)) {
 				errLine(c.red(`  ${error instanceof Error ? error.message : String(error)}`));
@@ -1032,8 +1024,8 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 			void addAndResume();
 			return;
 		}
-		if (key.type === 'char' && key.value === 'f') {
-			void forgetAndResume();
+		if (key.type === 'char' && key.value === 'm') {
+			void manageAndResume();
 			return;
 		}
 		const tunnels = tk.list();
