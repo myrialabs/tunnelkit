@@ -180,13 +180,25 @@ describe('renderDashboard', () => {
 		const lines = renderDashboard({ tunnels: [], cursor: 0, stopping: false, flash: '', termCols: 100 });
 		const joined = lines.join('\n');
 		expect(joined).toContain('nothing running yet');
-		// Empty state shows the full footer so all keybindings are always discoverable.
+		// Empty state shows only actions that can be used.
 		expect(joined).toMatch(/m.*manage/);
 		expect(joined).toMatch(/n.*new/);
 		expect(joined).toMatch(/q.*quit/);
+		expect(joined).not.toMatch(/x.*stop/);
+		expect(joined).not.toMatch(/c.*copy/);
+		expect(joined).not.toMatch(/↑\/↓.*select/);
 		// No box should be drawn when there is nothing to box.
 		expect(joined).not.toContain('┌');
 		expect(joined).not.toContain('└');
+	});
+
+	it('hides select when there is only one tunnel', () => {
+		const lines = renderDashboard({ tunnels: [baseTunnels[0]], cursor: 0, stopping: false, flash: '', termCols: 100 });
+		const joined = lines.join('\n');
+		expect(joined).not.toMatch(/↑\/↓.*select/);
+		expect(joined).toMatch(/n.*new tunnel/);
+		expect(joined).toMatch(/x.*stop/);
+		expect(joined).toMatch(/c.*copy URL/);
 	});
 
 	it('renders a list without box borders', () => {
@@ -244,9 +256,9 @@ describe('renderDashboard', () => {
 		expect(joined).toMatch(/c.*copy/);
 		expect(joined).toMatch(/m.*manage/);
 		expect(joined).toMatch(/q.*quit/);
-		// ↑/↓ should appear before `n new` per the latest UX request.
+		// ↑/↓ should appear before `[n] new tunnel` per the latest UX request.
 		const selectIdx = joined.search(/↑\/↓/);
-		const newIdx = joined.search(/\bn new\b/);
+		const newIdx = joined.search(/\[n\] new tunnel/);
 		expect(selectIdx).toBeGreaterThan(-1);
 		expect(newIdx).toBeGreaterThan(selectIdx);
 	});

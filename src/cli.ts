@@ -99,7 +99,7 @@ ${c.bold('OPTIONS')}
 ${c.bold('INTERACTIVE')}
   Run ${c.accent('tunnelkit')} with no command in a terminal for a live control panel.
   Run many tunnels at once and manage them together:
-    ${c.bold('n')} new tunnel · ${c.bold('↑/↓')} select · ${c.bold('x')} stop selected · ${c.bold('c')} copy URL · ${c.bold('f')} forget saved · ${c.bold('q')} quit
+    ${c.bold('[↑/↓]')} select · ${c.bold('[n]')} new tunnel · ${c.bold('[x]')} stop · ${c.bold('[c]')} copy URL · ${c.bold('[m]')} manage saved · ${c.bold('[q]')} quit
   Starting a tunnel by command (e.g. ${c.accent('tunnelkit quick 3000')}) drops into the
   same panel, so you can add more from there.
 

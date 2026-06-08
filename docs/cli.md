@@ -50,22 +50,21 @@ instead, so scripts are unaffected.
 tunnelkit            # control panel (in a TTY)
 ```
 
-The panel shows each tunnel's status, public URL or ingress routes, live edge connections with their
-locations, and uptime:
+The panel shows each tunnel's status, public URL or ingress routes, and only the actions that apply
+to the current selection:
 
-```
-tunnelkit · 3 tunnels active   up 04:12
+```text
+  tunnelkit > tunnels
 
-❯ ● quick  http://localhost:3000  https://aaa.trycloudflare.com  2 conns SIN,LAX
-  ● remote prod                   3 routes                       1 conn  SIN
-      app.example.com    →  http://localhost:3000
-      api.example.com    →  http://localhost:8080
-      admin.example.com  →  http://localhost:9000
-  ● local  my-app                 2 routes                       4 conns SIN,LAX,FRA,IAD
-      shop.example.com   →  http://localhost:4000
-      cms.example.com    →  http://localhost:4001
+  ❯ ●  quick-3000  →  https://aaa.trycloudflare.com
+    ●  prod        →  2 routes
+        - http://localhost:3000  →  app.example.com
+        - http://localhost:8080  →  api.example.com
+    ●  my-app      →  2 routes
+        - http://localhost:4000  →  shop.example.com
+        - http://localhost:4001  →  cms.example.com
 
-  ↑/↓ select · n new · x stop · c copy URL · f forget · q quit
+  [↑/↓] select   [n] new tunnel   [x] stop   [c] copy URL   [m] manage saved   [q] quit
 ```
 
 | Key | Action |
@@ -74,13 +73,25 @@ tunnelkit · 3 tunnels active   up 04:12
 | `n` | Start another tunnel — opens a mode wizard (Quick / Remote / Local / a saved one) |
 | `x` | Stop the selected tunnel; the others keep running |
 | `c` | Copy the selected tunnel's URL to the clipboard |
-| `f` | Forget a saved tunnel (drops it from the local store; Cloudflare itself is untouched) |
+| `m` | Manage saved tunnels (edit tokens/routes, forget entries, or log out from Cloudflare) |
 | `q` / `Ctrl+C` | Stop **all** tunnels and exit |
 
-Pressing `n` opens a wizard (mode → prompts for port / token / routes); `Esc` steps back one level
-without exiting. With no tunnels running the wizard opens automatically. Starting a tunnel by
-command (e.g. `tunnelkit quick 3000`) opens the panel automatically, so you can add more from
-there.
+Pressing `n` opens a breadcrumbed wizard (mode → prompts for port / token / routes). `Esc` steps
+back one level while filling forms instead of jumping out of the flow. Long-running steps keep their
+progress visible under the breadcrumb:
+
+```text
+  tunnelkit > new tunnel > local
+
+  ✓ tunnel id 7ae239c2-...
+  ✓ app.example.com routed
+  ✓ api.example.com routed
+
+  ⠋ Starting local tunnel... (Esc to cancel)
+```
+
+With no tunnels running the wizard opens automatically. Starting a tunnel by command (e.g.
+`tunnelkit quick 3000`) opens the panel automatically, so you can add more from there.
 
 Outside a TTY, commands run non-interactively — missing arguments error, destructive actions skip
 confirmation, and there is no panel. Pass [`--yes`](#global-options) to suppress confirmation

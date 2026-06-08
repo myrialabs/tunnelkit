@@ -101,6 +101,114 @@ export const c = {
 export const out = (line = ''): void => void process.stdout.write(`${line}\n`);
 export const errLine = (line = ''): void => void process.stderr.write(`${line}\n`);
 
+const UI_PAD = '  ';
+const UI_GAP = '';
+const ACTION_GAP = '   ';
+
+export type Breadcrumb = string | string[];
+
+function formatBreadcrumb(parts: Breadcrumb | undefined): string | undefined {
+	if (!parts) return undefined;
+	const list = Array.isArray(parts) ? parts : parts.split('>').map((p) => p.trim()).filter(Boolean);
+	if (list.length === 0) return undefined;
+	return UI_PAD + list.map((part, i) => (i === list.length - 1 ? c.bold(part) : c.dim(part))).join(c.dim(' > '));
+}
+
+function action(key: string, label: string): string {
+	return c.dim('[') + c.accent(key) + c.dim(`] ${label}`);
+}
+
+function actionBar(items: { key: string; label: string }[]): string {
+	return UI_PAD + items.map((item) => action(item.key, item.label)).join(c.dim(ACTION_GAP));
+}
+
+function screenLines(opts: { breadcrumb?: Breadcrumb; title?: string; body: string[]; actions?: { key: string; label: string }[] }): string[] {
+	const lines: string[] = [];
+	const crumb = formatBreadcrumb(opts.breadcrumb);
+	if (crumb) {
+		lines.push(crumb);
+		lines.push(UI_GAP);
+	}
+	if (opts.title) {
+		lines.push(UI_PAD + c.bold(opts.title));
+		lines.push(UI_GAP);
+	}
+	lines.push(...opts.body);
+	if (opts.actions && opts.actions.length > 0) {
+		lines.push(UI_GAP);
+		lines.push(actionBar(opts.actions));
+	}
+	return lines;
+}
+
+export function printScreen(opts: { breadcrumb?: Breadcrumb; title?: string; body: string[]; actions?: { key: string; label: string }[] }): void {
+	out(screenLines(opts).join('\n'));
+}
+
+export interface ProgressScreen {
+	info: (message: string) => void;
+	start: (message: string) => void;
+	succeed: (message: string) => void;
+	stop: () => void;
+}
+
+export function progressScreen(opts: { breadcrumb?: Breadcrumb } = {}): ProgressScreen {
+	const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+	const lines: string[] = [];
+	let current = '';
+	let frame = 0;
+	let rendered = 0;
+	let timer: ReturnType<typeof setInterval> | undefined;
+
+	const render = (): void => {
+		if (!process.stdout.isTTY) return;
+		const hasHistory = lines.length > 0;
+		const body = [
+			...lines.map((line) => `${UI_PAD}${line}`),
+			...(current ? [...(hasHistory ? [UI_GAP] : []), `${UI_PAD}${c.accent(frames[frame])} ${current}`] : [])
+		];
+		const next = screenLines({ breadcrumb: opts.breadcrumb, body });
+		const reset = rendered > 1 ? `\x1b[${rendered - 1}A` : '';
+		process.stdout.write(`\r${reset}${CLEAR_DOWN}${next.join('\n')}`);
+		rendered = next.length;
+		frame = (frame + 1) % frames.length;
+	};
+
+	const startTimer = (): void => {
+		if (!process.stdout.isTTY || timer) return;
+		process.stdout.write(CURSOR_HIDE);
+		timer = setInterval(render, 80);
+	};
+
+	const stopTimer = (): void => {
+		if (!timer) return;
+		clearInterval(timer);
+		timer = undefined;
+	};
+
+	return {
+		info: (message) => {
+			lines.push(c.dim(message));
+			render();
+		},
+		start: (message) => {
+			current = message;
+			startTimer();
+			render();
+		},
+		succeed: (message) => {
+			stopTimer();
+			current = '';
+			lines.push(`${c.accent('✓')} ${message}`);
+			render();
+		},
+		stop: () => {
+			stopTimer();
+			process.stdout.write(CURSOR_SHOW);
+		}
+	};
+}
+
 // --- Cursor / screen control ---
 
 const CURSOR_HIDE = '\x1b[?25l';
@@ -113,9 +221,8 @@ const LEAVE_ALT = '\x1b[?1049l';
 
 /**
  * Reset to the top-left and clear downward — used to start a fresh wizard pass.
- * Within a pass, prompts/menus accumulate (each leaves a `✓` summary); this wipes
- * the slate between passes (e.g. an Esc step-back re-shows the mode menu clean).
- * No-op without a TTY.
+ * This wipes the slate between passes (e.g. an Esc step-back re-shows the mode
+ * menu clean). No-op without a TTY.
  */
 export function clearScreen(): void {
 	if (process.stdout.isTTY) process.stdout.write(CURSOR_HOME + CLEAR_DOWN);
@@ -244,23 +351,31 @@ function readKeys(onKey: (key: Key) => void): () => void {
 
 // --- Spinner (no-op off-TTY) ---
 
-export function spinner(message: string): { stop: (final?: string) => void } {
+export function spinner(message: string, opts: { breadcrumb?: Breadcrumb } = {}): { stop: (final?: string) => void } {
 	if (!process.stdout.isTTY) {
 		out(message);
 		return { stop: (final) => final && out(final) };
 	}
 	const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 	let i = 0;
+	let rendered = 0;
 	process.stdout.write(CURSOR_HIDE);
 	const timer = setInterval(() => {
-		process.stdout.write(`\r${CLEAR_LINE}${c.accent(frames[i])} ${message}`);
+		const lines = screenLines({
+			breadcrumb: opts.breadcrumb,
+			body: [`${UI_PAD}${c.accent(frames[i])} ${message}`]
+		});
+		const reset = rendered > 1 ? `\x1b[${rendered - 1}A` : '';
+		process.stdout.write(`\r${reset}${CLEAR_DOWN}${lines.join('\n')}`);
+		rendered = lines.length;
 		i = (i + 1) % frames.length;
 	}, 80);
 	return {
 		stop: (final) => {
 			clearInterval(timer);
-			process.stdout.write(`\r${CLEAR_LINE}${CURSOR_SHOW}`);
-			if (final) out(final);
+			const reset = rendered > 1 ? `\x1b[${rendered - 1}A` : '';
+			process.stdout.write(`\r${reset}${CLEAR_DOWN}${CURSOR_SHOW}`);
+			if (final && !opts.breadcrumb) out(final);
 		}
 	};
 }
@@ -270,6 +385,10 @@ export function spinner(message: string): { stop: (final?: string) => void } {
 export interface PromptOptions {
 	/** Pre-filled value, also returned verbatim when there is no TTY. */
 	default?: string;
+	/** Optional breadcrumb printed above the prompt. */
+	breadcrumb?: Breadcrumb;
+	/** Optional explanatory lines shown between the breadcrumb and prompt. */
+	intro?: string[];
 	/** Re-ask until a non-empty value is given (ignored without a default off-TTY). */
 	required?: boolean;
 	/** Validate the trimmed input; return an error string to re-ask. */
@@ -295,30 +414,51 @@ export function prompt(question: string, opts: PromptOptions = {}): Promise<stri
 	return new Promise<string>((resolve, reject) => {
 		let value = '';
 		let error = '';
+		let renderedBodyIndex = 0;
 
 		const masked = (s: string): string => (opts.secret ? '•'.repeat(s.length) : s);
 
 		const render = (): void => {
-			const line1 = `${c.accent('?')} ${question}${defHint}: ${masked(value)}`;
-			const line2 = error ? c.yellow(`  ${error}`) : c.dim('  Enter submit · Esc cancel');
+			const body = [
+				...(opts.intro ?? []).map((line) => (line ? UI_PAD + line : UI_GAP)),
+				...(opts.intro && opts.intro.length > 0 ? [UI_GAP] : []),
+				`${UI_PAD}${c.accent('?')} ${question}${defHint}: ${masked(value)}`
+			];
+			if (error) body.push(`${UI_PAD}${c.yellow(error)}`);
+			const lines = screenLines({
+				breadcrumb: opts.breadcrumb,
+				body,
+				actions: error ? undefined : [
+					{ key: 'Enter', label: 'submit' },
+					{ key: 'Esc', label: 'back' }
+				]
+			});
+			const line1 = body[body.length - (error ? 2 : 1)];
 			const col = plainLen(line1) + 1;
+			const bodyIndex = lines.indexOf(line1);
+			const up = Math.max(0, lines.length - 1 - bodyIndex);
+			const reset = opts.breadcrumb ? CURSOR_HOME : renderedBodyIndex > 0 ? `\x1b[${renderedBodyIndex}A` : '';
 			// The cursor lives at the end of `value`; repaint from there clearing
 			// downward, then put it back after the text being edited.
-			process.stdout.write(`\r${CLEAR_DOWN}${line1}\n${line2}\x1b[1A\x1b[${col}G`);
+			process.stdout.write(`\r${reset}${CLEAR_DOWN}${lines.join('\n')}\x1b[${up}A\x1b[${col}G`);
+			renderedBodyIndex = bodyIndex;
 		};
 
 		const cleanup = (): void => {
 			dispose();
-			process.stdout.write(`\r${CLEAR_DOWN}`);
+			const reset = opts.breadcrumb ? CURSOR_HOME : renderedBodyIndex > 0 ? `\x1b[${renderedBodyIndex}A` : '';
+			process.stdout.write(`\r${reset}${CLEAR_DOWN}`);
 		};
 
-		// Submitting leaves a compact `✓ question: value` line behind instead of
-		// erasing, so multi-step wizards accumulate their answers on screen rather
-		// than wiping each step. Cancelling still erases (it's a step-back).
+		// Command-style prompts leave a compact `✓ question: value` line behind.
+		// Breadcrumb screens are redrawn as full screens, so they clear instead
+		// of stacking summaries above the next breadcrumb.
 		const finish = (v: string): void => {
 			dispose();
 			const shown = v ? c.bold(masked(v)) : c.dim('—');
-			process.stdout.write(`\r${CLEAR_DOWN}${c.accent('✓')} ${question}: ${shown}\n`);
+			const reset = opts.breadcrumb ? CURSOR_HOME : renderedBodyIndex > 0 ? `\x1b[${renderedBodyIndex}A` : '';
+			const summary = opts.breadcrumb ? '' : `${UI_PAD}${c.accent('✓')} ${question}: ${shown}\n`;
+			process.stdout.write(`\r${reset}${CLEAR_DOWN}${summary}`);
 		};
 
 		const submit = (): void => {
@@ -369,31 +509,47 @@ export function prompt(question: string, opts: PromptOptions = {}): Promise<stri
  * Esc / Ctrl+C cancels (rejecting with a {@link CancelError}). Returns the
  * default without a TTY.
  */
-export function confirm(question: string, opts: { default?: boolean } = {}): Promise<boolean> {
+export function confirm(question: string, opts: { default?: boolean; breadcrumb?: Breadcrumb } = {}): Promise<boolean> {
 	const def = opts.default ?? false;
 	if (!process.stdin.isTTY) return Promise.resolve(def);
 
-	const line1 = `${c.accent('?')} ${question} ${c.dim(`(${def ? 'Y/n' : 'y/N'})`)} `;
+	const line1 = `${UI_PAD}${c.accent('?')} ${question} ${c.dim(`(${def ? 'Y/n' : 'y/N'})`)} `;
 
 	return new Promise<boolean>((resolve, reject) => {
+		let renderedBodyIndex = 0;
+
 		const render = (): void => {
-			// Show the default explicitly in the footer so the user never has to
-			// cross-reference the (Y/n) hint on the previous line.
-			const line2 = c.dim(`  y / n · Enter = ${def ? 'yes' : 'no'} (default) · Esc cancel`);
+			const lines = screenLines({
+				breadcrumb: opts.breadcrumb,
+				body: [line1],
+				actions: [
+					{ key: 'y', label: 'yes' },
+					{ key: 'n', label: 'no' },
+					{ key: 'Enter', label: `${def ? 'yes' : 'no'} default` },
+					{ key: 'Esc', label: 'back' }
+				]
+			});
 			const col = plainLen(line1) + 1;
-			process.stdout.write(`\r${CLEAR_DOWN}${line1}\n${line2}\x1b[1A\x1b[${col}G`);
+			const bodyIndex = lines.indexOf(line1);
+			const up = Math.max(0, lines.length - 1 - bodyIndex);
+			const reset = opts.breadcrumb ? CURSOR_HOME : renderedBodyIndex > 0 ? `\x1b[${renderedBodyIndex}A` : '';
+			process.stdout.write(`\r${reset}${CLEAR_DOWN}${lines.join('\n')}\x1b[${up}A\x1b[${col}G`);
+			renderedBodyIndex = bodyIndex;
 		};
 
 		const cleanup = (): void => {
 			dispose();
-			process.stdout.write(`\r${CLEAR_DOWN}`);
+			const reset = opts.breadcrumb ? CURSOR_HOME : renderedBodyIndex > 0 ? `\x1b[${renderedBodyIndex}A` : '';
+			process.stdout.write(`\r${reset}${CLEAR_DOWN}`);
 		};
 
-		// Leave a `✓ question yes/no` line behind on answer so the wizard keeps its
-		// history; cancelling (Esc) still erases.
+		// Command-style confirms leave a `✓ question yes/no` line behind.
+		// Breadcrumb screens clear so the next screen starts with its breadcrumb.
 		const finish = (val: boolean): void => {
 			dispose();
-			process.stdout.write(`\r${CLEAR_DOWN}${c.accent('✓')} ${question} ${c.bold(val ? 'yes' : 'no')}\n`);
+			const reset = opts.breadcrumb ? CURSOR_HOME : renderedBodyIndex > 0 ? `\x1b[${renderedBodyIndex}A` : '';
+			const summary = opts.breadcrumb ? '' : `${UI_PAD}${c.accent('✓')} ${question} ${c.bold(val ? 'yes' : 'no')}\n`;
+			process.stdout.write(`\r${reset}${CLEAR_DOWN}${summary}`);
 		};
 
 		const dispose = rawInput((chunk) => {
@@ -433,7 +589,11 @@ export interface Choice<T> {
  * Arrow-key single-select menu. Resolves with the chosen value, or rejects with
  * a {@link CancelError} on Esc / `q` / Ctrl+C. Requires a TTY.
  */
-export function select<T>(title: string, choices: Choice<T>[], opts: { initialIndex?: number } = {}): Promise<T> {
+export function select<T>(
+	title: string,
+	choices: Choice<T>[],
+	opts: { initialIndex?: number; breadcrumb?: Breadcrumb } = {}
+): Promise<T> {
 	if (!process.stdin.isTTY) return Promise.reject(new Error('Interactive selection requires a TTY.'));
 	if (choices.length === 0) return Promise.reject(new Error('No choices to select from.'));
 
@@ -441,41 +601,50 @@ export function select<T>(title: string, choices: Choice<T>[], opts: { initialIn
 		let index = Math.min(Math.max(opts.initialIndex ?? 0, 0), choices.length - 1);
 		let rendered = 0;
 
-		const footer = c.dim('  ↑/↓ navigate · Enter select · Esc cancel');
-		const lineCount = choices.length + 2; // title + choices + footer
-
 		const render = (): void => {
-			const lines = [c.bold(title)];
-			choices.forEach((choice, i) => {
+			const body = choices.map((choice, i) => {
 				const active = i === index;
 				const pointer = active ? c.accent('❯') : ' ';
 				const label = active ? c.accent(choice.label) : choice.label;
 				const hint = choice.hint ? c.dim(`  ${choice.hint}`) : '';
-				lines.push(`${pointer} ${label}${hint}`);
+				return `${UI_PAD}${pointer} ${label}${hint}`;
 			});
-			lines.push(footer);
+			const lines = screenLines({
+				breadcrumb: opts.breadcrumb,
+				title,
+				body,
+				actions: [
+					{ key: '↑/↓', label: 'navigate' },
+					{ key: 'Enter', label: 'select' },
+					{ key: 'Esc', label: 'back' }
+				]
+			});
 
-			let frame = rendered > 0 ? `\x1b[${rendered}A` : CURSOR_HIDE;
+			let frame = opts.breadcrumb ? CURSOR_HOME : rendered > 0 ? `\x1b[${rendered}A` : CURSOR_HIDE;
+			if (opts.breadcrumb) frame += CLEAR_DOWN + CURSOR_HIDE;
 			frame += lines.map((line) => `${CLEAR_LINE}${line}`).join('\n') + '\n';
 			process.stdout.write(frame);
-			rendered = lineCount;
+			rendered = lines.length;
 		};
 
 		const close = (): void => {
 			dispose();
 			// Erase the menu so it doesn't pile up behind the next prompt/panel.
-			if (rendered > 0) process.stdout.write(`\x1b[${rendered}A${CLEAR_DOWN}`);
+			if (opts.breadcrumb) process.stdout.write(CURSOR_HOME + CLEAR_DOWN);
+			else if (rendered > 0) process.stdout.write(`\x1b[${rendered}A${CLEAR_DOWN}`);
 			rendered = 0;
 			process.stdout.write(CURSOR_SHOW);
 		};
 
-		// Selecting collapses the menu to a single `✓ title choice` line instead of
-		// erasing it, so multi-step wizards keep their earlier answers on screen.
+		// Command-style menus collapse to a `✓ title choice` line. Breadcrumb
+		// screens clear so the next screen can own the top of the terminal.
 		const finish = (): void => {
 			dispose();
-			if (rendered > 0) process.stdout.write(`\x1b[${rendered}A${CLEAR_DOWN}`);
+			if (opts.breadcrumb) process.stdout.write(CURSOR_HOME + CLEAR_DOWN);
+			else if (rendered > 0) process.stdout.write(`\x1b[${rendered}A${CLEAR_DOWN}`);
 			rendered = 0;
-			process.stdout.write(`${CURSOR_SHOW}${c.accent('✓')} ${title}: ${c.bold(choices[index].label)}\n`);
+			const summary = opts.breadcrumb ? '' : `${UI_PAD}${c.accent('✓')} ${title}: ${c.bold(choices[index].label)}\n`;
+			process.stdout.write(`${CURSOR_SHOW}${summary}`);
 		};
 
 		const dispose = readKeys((key) => {
@@ -509,11 +678,15 @@ export function select<T>(title: string, choices: Choice<T>[], opts: { initialIn
  * this rejects with a {@link CancelError}. Without a TTY there is nothing to
  * listen to, so it just runs the task behind a plain spinner.
  */
-export async function runCancelable<T>(message: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+export async function runCancelable<T>(
+	message: string,
+	run: (signal: AbortSignal) => Promise<T>,
+	opts: { breadcrumb?: Breadcrumb } = {}
+): Promise<T> {
 	const controller = new AbortController();
 
 	if (!process.stdin.isTTY) {
-		const spin = spinner(message);
+		const spin = spinner(message, opts);
 		try {
 			return await run(controller.signal);
 		} finally {
@@ -521,7 +694,7 @@ export async function runCancelable<T>(message: string, run: (signal: AbortSigna
 		}
 	}
 
-	const spin = spinner(`${message} ${c.dim('(Esc to cancel)')}`);
+	const spin = spinner(`${message} ${c.dim('(Esc to cancel)')}`, opts);
 	const dispose = readKeys((key) => {
 		if (key.type === 'escape' || key.type === 'ctrl-c' || (key.type === 'char' && key.value === 'q')) {
 			controller.abort();
@@ -533,6 +706,30 @@ export async function runCancelable<T>(message: string, run: (signal: AbortSigna
 		return result;
 	} catch (error) {
 		spin.stop();
+		if (controller.signal.aborted) throw new CancelError();
+		throw error;
+	} finally {
+		dispose();
+	}
+}
+
+export async function runProgress<T>(
+	progress: ProgressScreen,
+	message: string,
+	run: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+	const controller = new AbortController();
+	progress.start(`${message} ${c.dim('(Esc to cancel)')}`);
+	const dispose = process.stdin.isTTY
+		? readKeys((key) => {
+			if (key.type === 'escape' || key.type === 'ctrl-c' || (key.type === 'char' && key.value === 'q')) {
+				controller.abort();
+			}
+		})
+		: () => {};
+	try {
+		return await run(controller.signal);
+	} catch (error) {
 		if (controller.signal.aborted) throw new CancelError();
 		throw error;
 	} finally {
@@ -706,11 +903,10 @@ export function renderDashboard(opts: {
 	termCols: number;
 	now?: number;
 }): string[] {
-	const lines: string[] = [];
+	const body: string[] = [];
 
 	if (opts.tunnels.length === 0) {
-		lines.push('');
-		lines.push(c.dim('   nothing running yet'));
+		body.push(UI_PAD + c.dim('nothing running yet'));
 	}
 
 	const items = opts.tunnels.map((t) => ({
@@ -728,8 +924,6 @@ export function renderDashboard(opts: {
 	const blinkOn = Math.floor(now / 500) % 2 === 0;
 	const CONNECTING_WINDOW_MS = 30_000;
 
-	lines.push('');
-
 	opts.tunnels.forEach((t, i) => {
 		const item = items[i];
 		const selected = i === opts.cursor;
@@ -738,8 +932,8 @@ export function renderDashboard(opts: {
 		const isConnecting =
 			!healthy && t.startedAt !== undefined && now - new Date(t.startedAt).getTime() < CONNECTING_WINDOW_MS;
 
-		lines.push(
-			'  ' +
+		body.push(
+			UI_PAD +
 				formatTunnelRow({
 					selected,
 					healthy,
@@ -760,40 +954,40 @@ export function renderDashboard(opts: {
 		if (t.routes.length >= 1) {
 			for (const r of t.routes) {
 				const sub = truncatePlain(`${r.service}  →  ${r.hostname}`, urlWidth + nameWidth);
-				lines.push('  ' + c.dim(`       - ${sub}`));
+				body.push(UI_PAD + c.dim(`      - ${sub}`));
 			}
 		}
 	});
 
 	if (opts.flash) {
-		lines.push('');
-		lines.push('   ' + c.accent2(opts.flash));
+		body.push(UI_GAP);
+		body.push(UI_PAD + c.accent2(opts.flash));
 	}
 
-	lines.push('');
-	lines.push(
-		'   ' +
-			c.accent('↑/↓') +
-			c.dim(' select   ') +
-			c.accent('n') +
-			c.dim(' new   ') +
-			c.accent('x') +
-			c.dim(' stop   ') +
-			c.accent('c') +
-			c.dim(' copy   ') +
-			c.accent('m') +
-			c.dim(' manage   ') +
-			c.accent('q') +
-			c.dim(' quit')
-	);
+	const selected = opts.tunnels[opts.cursor];
+	const canCopy = !!selected && (selected.publicUrl !== '' || selected.routes.length > 1);
+	const actions = opts.stopping
+		? [{ key: 'q', label: 'quit' }]
+		: [
+			...(opts.tunnels.length > 1 ? [{ key: '↑/↓', label: 'select' }] : []),
+			{ key: 'n', label: 'new tunnel' },
+			...(opts.tunnels.length > 0 ? [{ key: 'x', label: 'stop' }] : []),
+			...(canCopy ? [{ key: 'c', label: 'copy URL' }] : []),
+			{ key: 'm', label: 'manage saved' },
+			{ key: 'q', label: 'quit' }
+		];
 
-	return lines;
+	return screenLines({
+		breadcrumb: ['tunnelkit', 'tunnels'],
+		body,
+		actions
+	});
 }
 
 /**
  * Persistent multi-tunnel control panel. Lists every tunnel `tk` is running with
  * a live status, lets you start more (`n`), stop the highlighted one (`x`), copy
- * its URL (`c`), forget a saved one (`f`), and quit (`q` / Ctrl+C, stops
+ * its URL (`c`), manage saved tunnels (`m`), and quit (`q` / Ctrl+C, stops
  * everything). Without a TTY it prints a static summary and idles until a
  * signal — the old foreground behaviour, so pipes and CI are unaffected.
  */

@@ -12,7 +12,7 @@ import {
 	prompt,
 	confirm,
 	select,
-	spinner,
+	progressScreen,
 	runSession,
 	clearScreen,
 	CancelError,
@@ -61,7 +61,7 @@ export async function addTunnelFlow(tk: TunnelKit): Promise<void> {
 
 		let mode: string;
 		try {
-			mode = await select('Start a new tunnel', choices);
+			mode = await select('Start a new tunnel', choices, { breadcrumb: ['tunnelkit', 'new tunnel'] });
 		} catch (error) {
 			if (error instanceof CancelError) return;
 			throw error;
@@ -77,51 +77,90 @@ export async function addTunnelFlow(tk: TunnelKit): Promise<void> {
 		} catch (error) {
 			if (error instanceof CancelError) continue;
 			out(c.red(`  ${error instanceof Error ? error.message : String(error)}`));
-			await prompt('Press Enter to return', { default: '' }).catch(() => undefined);
+			await prompt('Press Enter to return', { default: '', breadcrumb: ['tunnelkit', 'new tunnel'] }).catch(() => undefined);
 		}
 	}
 }
 
 async function addQuick(tk: TunnelKit): Promise<void> {
-	const service = await prompt('Local port or URL to expose', { default: '3000', required: true, validate: validateQuickService });
-	const autoStop = await prompt('Auto-stop after N minutes (0 = never)', { default: '0', validate: validateMinutes });
-	const minutes = Number(autoStop) > 0 ? Number(autoStop) : undefined;
-	await startQuick(tk, resolveQuickService(service), minutes);
+	const breadcrumb = ['tunnelkit', 'new tunnel', 'quick'];
+	for (;;) {
+		const service = await prompt('Local port or URL to expose', { default: '3000', required: true, validate: validateQuickService, breadcrumb });
+		let autoStop: string;
+		try {
+			autoStop = await prompt('Auto-stop after N minutes (0 = never)', { default: '0', validate: validateMinutes, breadcrumb });
+		} catch (error) {
+			if (error instanceof CancelError) continue;
+			throw error;
+		}
+		const minutes = Number(autoStop) > 0 ? Number(autoStop) : undefined;
+		await startQuick(tk, resolveQuickService(service), minutes, { breadcrumb });
+		return;
+	}
 }
 
 async function addRemote(tk: TunnelKit): Promise<void> {
-	out(`\n  Get your tunnel token from the Cloudflare dashboard:\n`);
-	out(`    ${c.url(CLOUDFLARE_TUNNELS_DASHBOARD_URL)}\n`);
-	const token = extractTunnelToken(await prompt('Tunnel token', { required: true }));
-	const name = (await prompt('Name (optional)', { default: '' })).trim();
-	const id = name || `remote-${Date.now()}`;
-	// Silent: the panel re-renders with the new tunnel on resume.
-	await startRemote(tk, { id, token, name: name || undefined, silent: true });
+	const breadcrumb = ['tunnelkit', 'new tunnel', 'remote'];
+	for (;;) {
+		const token = extractTunnelToken(
+			await prompt('Tunnel token', {
+				required: true,
+				breadcrumb,
+				intro: [
+					'Get your tunnel token from the Cloudflare dashboard:',
+					'',
+					`  ${c.url(CLOUDFLARE_TUNNELS_DASHBOARD_URL)}`
+				]
+			})
+		);
+		let name: string;
+		try {
+			name = (await prompt('Name (optional)', { default: '', breadcrumb })).trim();
+		} catch (error) {
+			if (error instanceof CancelError) continue;
+			throw error;
+		}
+		const id = name || `remote-${Date.now()}`;
+		// Silent: the panel re-renders with the new tunnel on resume.
+		await startRemote(tk, { id, token, name: name || undefined, silent: true, breadcrumb });
+		return;
+	}
 }
 
 async function addLocal(tk: TunnelKit): Promise<void> {
-	await ensureBinary(tk);
+	const breadcrumb = ['tunnelkit', 'new tunnel', 'local'];
+	const setupProgress = progressScreen({ breadcrumb });
+	try {
+		await ensureBinary(tk, { breadcrumb, progress: setupProgress });
+	} finally {
+		setupProgress.stop();
+	}
+	clearScreen();
 	if (!tk.local.checkAuth().authenticated) {
-		const doLogin = await confirm('Not logged in to Cloudflare. Log in now?', { default: true });
+		const doLogin = await confirm('Not logged in to Cloudflare. Log in now?', { default: true, breadcrumb });
 		if (!doLogin) throw new CancelError();
-		await performLogin(tk);
+		await performLogin(tk, { breadcrumb });
+		clearScreen();
 	}
 
-	const saved = tk.store.getLocals();
-	const name = await prompt('Tunnel name', { required: true, default: saved[0]?.name });
-	const previous = saved.find((l) => l.name === name && l.ingress.length > 0);
-	if (previous) {
-		out(c.dim(`  reusing saved routes for "${name}"`));
-		return await startLocalSaved(tk, name, previous);
+	for (;;) {
+		const saved = tk.store.getLocals();
+		const name = await prompt('Tunnel name', { required: true, default: saved[0]?.name, breadcrumb });
+		const previous = saved.find((l) => l.name === name && l.ingress.length > 0);
+		if (previous) {
+			return await startLocalSaved(tk, name, previous, { breadcrumb });
+		}
+
+		const routes = await editRoutesFlow([], `Routes for "${name}"`, {
+			doneLabel: 'Start tunnel',
+			requireRoute: true,
+			breadcrumb: ['tunnelkit', 'new tunnel', 'local', 'routes']
+		});
+		if (routes === null) continue;
+
+		await startLocalNew(tk, name, routes, { silent: true, breadcrumb });
+		return;
 	}
-
-	const routes = await editRoutesFlow([], `Routes for "${name}"`, {
-		doneLabel: 'Start tunnel',
-		requireRoute: true
-	});
-	if (!routes) throw new CancelError();
-
-	await startLocalNew(tk, name, routes, { silent: true });
 }
 
 async function addSaved(tk: TunnelKit): Promise<void> {
@@ -140,7 +179,7 @@ async function addSaved(tk: TunnelKit): Promise<void> {
 		})),
 		{ label: 'Cancel', value: 'cancel' }
 	];
-	const pick = await select('Run a saved tunnel', choices);
+	const pick = await select('Run a saved tunnel', choices, { breadcrumb: ['tunnelkit', 'new tunnel', 'saved'] });
 	if (pick === 'cancel') return;
 
 	const sep = pick.indexOf(':');
@@ -148,10 +187,10 @@ async function addSaved(tk: TunnelKit): Promise<void> {
 	const id = pick.slice(sep + 1);
 	if (kind === 'remote') {
 		const entry = remotes.find((r) => r.id === id);
-		if (entry) await startRemote(tk, { id: entry.id, token: entry.token, name: entry.name });
+		if (entry) await startRemote(tk, { id: entry.id, token: entry.token, name: entry.name, breadcrumb: ['tunnelkit', 'new tunnel', 'saved'] });
 	} else {
 		const entry = locals.find((l) => l.id === id);
-		if (entry) await startLocalSaved(tk, entry.name, entry);
+		if (entry) await startLocalSaved(tk, entry.name, entry, { breadcrumb: ['tunnelkit', 'new tunnel', 'saved'] });
 	}
 }
 
@@ -163,7 +202,7 @@ async function addSaved(tk: TunnelKit): Promise<void> {
 async function editRoutesFlow(
 	initial: { hostname: string; service: string }[],
 	title: string,
-	opts: { doneLabel?: string; requireRoute?: boolean } = {}
+	opts: { doneLabel?: string; requireRoute?: boolean; breadcrumb?: string[] } = {}
 ): Promise<{ hostname: string; service: string }[] | null> {
 	let routes = [...initial];
 	const doneLabel = opts.doneLabel ?? 'Save & done';
@@ -186,7 +225,7 @@ async function editRoutesFlow(
 
 		let pick: string;
 		try {
-			pick = await select(title, [...routeChoices, ...actionChoices]);
+			pick = await select(title, [...routeChoices, ...actionChoices], { breadcrumb: opts.breadcrumb });
 		} catch (e) {
 			if (e instanceof CancelError) return null;
 			throw e;
@@ -196,18 +235,26 @@ async function editRoutesFlow(
 		if (pick === 'done') return routes;
 
 		if (pick === 'add') {
-			let hostname: string;
-			let service: string;
-			try {
-				hostname = await prompt('Public hostname (e.g. app.example.com)', { required: true });
-				service = resolveQuickService(
-					await prompt('Local service URL', { default: 'http://localhost:3000', required: true })
-				);
-			} catch (e) {
-				if (e instanceof CancelError) continue;
-				throw e;
+			for (;;) {
+				let hostname: string;
+				let service: string;
+				try {
+					hostname = await prompt('Public hostname (e.g. app.example.com)', { required: true, breadcrumb: opts.breadcrumb });
+				} catch (e) {
+					if (e instanceof CancelError) break;
+					throw e;
+				}
+				try {
+					service = resolveQuickService(
+						await prompt('Local service URL', { default: 'http://localhost:3000', required: true, breadcrumb: opts.breadcrumb })
+					);
+				} catch (e) {
+					if (e instanceof CancelError) continue;
+					throw e;
+				}
+				routes = [...routes, { hostname, service }];
+				break;
 			}
-			routes = [...routes, { hostname, service }];
 			continue;
 		}
 
@@ -215,10 +262,14 @@ async function editRoutesFlow(
 		const idx = parseInt(pick.slice(2));
 		const route = routes[idx];
 		try {
-			const action = await select(`Route: ${route.hostname}`, [
-				{ label: 'Remove this route', value: 'remove', hint: route.service },
-				{ label: 'Back', value: 'back' }
-			]);
+			const action = await select(
+				`Route: ${route.hostname}`,
+				[
+					{ label: 'Remove this route', value: 'remove', hint: route.service },
+					{ label: 'Back', value: 'back' }
+				],
+				{ breadcrumb: opts.breadcrumb }
+			);
 			if (action === 'remove') {
 				routes = routes.filter((_, i) => i !== idx);
 			}
@@ -251,14 +302,17 @@ export async function manageSavedFlow(tk: TunnelKit): Promise<void> {
 	];
 
 	if (choices.length <= 1) {
-		out(c.dim('  No saved tunnels.'));
-		await prompt('Press Enter to return', { default: '' }).catch(() => undefined);
+		await prompt('Press Enter to return', {
+			default: '',
+			breadcrumb: ['tunnelkit', 'saved'],
+			intro: [c.dim('No saved tunnels.')]
+		}).catch(() => undefined);
 		return;
 	}
 
 	let pick: string;
 	try {
-		pick = await select('Manage saved', choices);
+		pick = await select('Manage saved', choices, { breadcrumb: ['tunnelkit', 'saved'] });
 	} catch (error) {
 		if (error instanceof CancelError) return;
 		throw error;
@@ -268,18 +322,25 @@ export async function manageSavedFlow(tk: TunnelKit): Promise<void> {
 	if (pick === 'logout') {
 		let ok = false;
 		try {
-			ok = await confirm('Log out from Cloudflare? (Removes the stored origin certificate.)', { default: false });
+			ok = await confirm('Log out from Cloudflare? (Removes the stored origin certificate.)', {
+				default: false,
+				breadcrumb: ['tunnelkit', 'saved', 'cloudflare']
+			});
 		} catch { return; }
 		if (!ok) return;
 		const { success } = tk.local.logout();
-		out(success ? c.accent('✓ Logged out — certificate removed.') : c.yellow('  Nothing to remove.'));
-		await prompt('Press Enter to return', { default: '' }).catch(() => undefined);
+		await prompt('Press Enter to return', {
+			default: '',
+			breadcrumb: ['tunnelkit', 'saved', 'cloudflare'],
+			intro: [success ? c.accent('✓ Logged out — certificate removed.') : c.yellow('Nothing to remove.')]
+		}).catch(() => undefined);
 		return;
 	}
 
 	const sep = pick.indexOf(':');
 	const kind = pick.slice(0, sep) as 'remote' | 'local';
 	const id = pick.slice(sep + 1);
+	const returnIntro: string[] = [];
 
 	if (kind === 'remote') {
 		const entry = remotes.find((r) => r.id === id);
@@ -287,39 +348,50 @@ export async function manageSavedFlow(tk: TunnelKit): Promise<void> {
 
 		let action: string;
 		try {
-			action = await select(entry.name, [
-				{ label: 'Edit token', value: 'edit' },
-				{ label: 'Forget', value: 'forget', hint: 'removes from local store only' },
-				{ label: 'Back', value: 'back' }
-			]);
+			action = await select(
+				entry.name,
+				[
+					{ label: 'Edit token', value: 'edit' },
+					{ label: 'Forget', value: 'forget', hint: 'removes from local store only' },
+					{ label: 'Back', value: 'back' }
+				],
+				{ breadcrumb: ['tunnelkit', 'saved', entry.name] }
+			);
 		} catch { return; }
 		if (action === 'back') return;
 
 		if (action === 'edit') {
-			out(`\n  Get your tunnel token from the Cloudflare dashboard:\n`);
-			out(`    ${c.url(CLOUDFLARE_TUNNELS_DASHBOARD_URL)}\n`);
 			let token: string;
 			try {
-				token = extractTunnelToken(await prompt('New token', { required: true, secret: true }));
+				token = extractTunnelToken(
+					await prompt('New token', {
+						required: true,
+						secret: true,
+						breadcrumb: ['tunnelkit', 'saved', entry.name, 'token'],
+						intro: [
+							'Get your tunnel token from the Cloudflare dashboard:',
+							'',
+							`  ${c.url(CLOUDFLARE_TUNNELS_DASHBOARD_URL)}`
+						]
+					})
+				);
 			} catch { return; }
-			const nameRaw = await prompt('Name', { default: entry.name }).catch(() => entry.name);
+			const nameRaw = await prompt('Name', { default: entry.name, breadcrumb: ['tunnelkit', 'saved', entry.name, 'token'] }).catch(() => entry.name);
 			const name = nameRaw.trim() || entry.name;
 			store.upsertRemote(entry.id, name, token);
-			out(c.accent(`✓ Updated "${name}".`));
+			returnIntro.push(c.accent(`✓ Updated "${name}".`));
 		} else if (action === 'forget') {
 			let ok = false;
 			try {
 				ok = await confirm(
 					`Forget remote "${entry.name}"? (Cloudflare tunnel is dashboard-managed and untouched.)`,
-					{ default: false }
+					{ default: false, breadcrumb: ['tunnelkit', 'saved', entry.name] }
 				);
 			} catch { return; }
 			if (!ok) return;
 			store.removeRemote(id);
-			out(
-				c.accent(`✓ Forgot "${entry.name}".`) +
-					`\n${c.dim('  (Cloudflare tunnel is dashboard-managed and untouched.)')}`
-			);
+			returnIntro.push(c.accent(`✓ Forgot "${entry.name}".`));
+			returnIntro.push(c.dim('(Cloudflare tunnel is dashboard-managed and untouched.)'));
 		}
 	} else {
 		const entry = locals.find((l) => l.id === id);
@@ -327,11 +399,15 @@ export async function manageSavedFlow(tk: TunnelKit): Promise<void> {
 
 		let action: string;
 		try {
-			action = await select(entry.name, [
-				{ label: 'Edit routes', value: 'edit' },
-				{ label: 'Forget', value: 'forget', hint: 'deletes from Cloudflare' },
-				{ label: 'Back', value: 'back' }
-			]);
+			action = await select(
+				entry.name,
+				[
+					{ label: 'Edit routes', value: 'edit' },
+					{ label: 'Forget', value: 'forget', hint: 'deletes from Cloudflare' },
+					{ label: 'Back', value: 'back' }
+				],
+				{ breadcrumb: ['tunnelkit', 'saved', entry.name] }
+			);
 		} catch { return; }
 		if (action === 'back') return;
 
@@ -339,34 +415,39 @@ export async function manageSavedFlow(tk: TunnelKit): Promise<void> {
 			const initial = entry.ingress
 				.filter((r): r is { hostname: string; service: string } => !!r.hostname)
 				.map((r) => ({ hostname: r.hostname, service: r.service }));
-			const routes = await editRoutesFlow(initial, `Routes for "${entry.name}"`);
+			const routes = await editRoutesFlow(initial, `Routes for "${entry.name}"`, {
+				breadcrumb: ['tunnelkit', 'saved', entry.name, 'routes']
+			});
 			if (routes === null) return;
 			store.upsertLocal({ ...entry, ingress: routes });
-			out(c.accent(`✓ Updated routes for "${entry.name}".`));
+			returnIntro.push(c.accent(`✓ Updated routes for "${entry.name}".`));
 		} else if (action === 'forget') {
 			let ok = false;
 			try {
 				ok = await confirm(
 					`Forget local "${entry.name}"? This DELETES the tunnel from Cloudflare (irreversible).`,
-					{ default: false }
+					{ default: false, breadcrumb: ['tunnelkit', 'saved', entry.name] }
 				);
 			} catch { return; }
 			if (!ok) return;
 
 			if (!hasAuth) {
-				out(c.yellow('  Not authenticated with Cloudflare. Skipping Cloudflare deletion.'));
+				returnIntro.push(c.yellow('Not authenticated with Cloudflare. Skipping Cloudflare deletion.'));
 			} else {
-				const spin = spinner(`Deleting "${entry.name}" from Cloudflare…`);
+				const progress = progressScreen({ breadcrumb: ['tunnelkit', 'saved', entry.name] });
 				try {
+					progress.start(`Deleting "${entry.name}" from Cloudflare…`);
 					await tk.local.delete(entry.name);
+					progress.succeed(`Deleted "${entry.name}" from Cloudflare.`);
 				} finally {
-					spin.stop();
+					progress.stop();
 				}
 			}
 			store.removeLocal(id);
-			out(c.accent(`✓ Forgot "${entry.name}" — removed from Cloudflare and the local store.`));
+			returnIntro.push(c.accent(`✓ Forgot "${entry.name}" — removed from Cloudflare and the local store.`));
 		}
 	}
 
-	await prompt('Press Enter to return', { default: '' }).catch(() => undefined);
+	clearScreen();
+	await prompt('Press Enter to return', { default: '', breadcrumb: ['tunnelkit', 'saved'], intro: returnIntro }).catch(() => undefined);
 }

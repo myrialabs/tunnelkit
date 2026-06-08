@@ -15,7 +15,18 @@ import { TunnelKit, resolveQuickService } from './tunnelkit.js';
 import { TunnelStore } from './store.js';
 import type { Logger } from './logger.js';
 import { firstValue, type ParsedArgs } from './cli-args.js';
-import { c, out, errLine, spinner, runCancelable } from './cli-ui.js';
+import {
+	c,
+	out,
+	errLine,
+	spinner,
+	runCancelable,
+	runProgress,
+	printScreen,
+	progressScreen,
+	type Breadcrumb,
+	type ProgressScreen
+} from './cli-ui.js';
 
 const formatArg = (value: unknown): string => (typeof value === 'string' ? value : inspect(value, { depth: 3 }));
 
@@ -60,9 +71,15 @@ export function makeStore(parsed: ParsedArgs): TunnelStore | null {
 
 export const isInteractive = (): boolean => process.stdin.isTTY === true && process.stdout.isTTY === true;
 
-export async function ensureBinary(tk: TunnelKit): Promise<void> {
+export async function ensureBinary(tk: TunnelKit, opts: { breadcrumb?: Breadcrumb; progress?: ProgressScreen } = {}): Promise<void> {
 	if (tk.bin.status().installed) return;
-	const spin = spinner('cloudflared not found — downloading…');
+	if (opts.progress) {
+		opts.progress.start('cloudflared not found — downloading…');
+		const path = await tk.bin.install();
+		opts.progress.succeed(`cloudflared installed → ${path}`);
+		return;
+	}
+	const spin = spinner('cloudflared not found — downloading…', { breadcrumb: opts.breadcrumb });
 	try {
 		const path = await tk.bin.install();
 		spin.stop(c.dim(`  cloudflared installed → ${path}`));
@@ -73,26 +90,48 @@ export async function ensureBinary(tk: TunnelKit): Promise<void> {
 }
 
 /** Run `cloudflared tunnel login`, surfacing the auth URL; cleans up its signal handler. */
-export async function performLogin(tk: TunnelKit): Promise<void> {
+export async function performLogin(tk: TunnelKit, opts: { breadcrumb?: Breadcrumb; progress?: ProgressScreen } = {}): Promise<void> {
 	const onSig = (): void => {
 		tk.local.cancelLogin();
 		process.exit(1);
 	};
 	process.once('SIGINT', onSig);
+	const progress = opts.progress ?? (opts.breadcrumb ? progressScreen({ breadcrumb: opts.breadcrumb }) : undefined);
 	try {
 		await new Promise<void>((resolve, reject) => {
 			tk.local.login({
 				onUrl: (url) => {
-					out('\n  Authorize this device in your browser:\n');
-					out(`    ${c.url(url)}\n`);
-					out(c.dim('  Waiting for approval…'));
+					if (progress) {
+						progress.info('Authorize this device in your browser:');
+						progress.info(`  ${c.url(url)}`);
+						progress.start('Waiting for approval…');
+						return;
+					}
+					printScreen({
+						breadcrumb: opts.breadcrumb,
+						body: [
+							'  Authorize this device in your browser:',
+							'',
+							`    ${c.url(url)}`,
+							'',
+							c.dim('  Waiting for approval…')
+						]
+					});
 				},
 				onComplete: () => resolve(),
 				onError: (message) => reject(new Error(message))
 			});
 		});
-		out(c.accent('\n✓ Logged in. Origin certificate saved.'));
+		if (progress) {
+			progress.succeed('Logged in. Origin certificate saved.');
+			return;
+		}
+		printScreen({
+			breadcrumb: opts.breadcrumb,
+			body: [`  ${c.accent('✓ Logged in. Origin certificate saved.')}`]
+		});
 	} finally {
+		progress?.stop();
 		process.removeListener('SIGINT', onSig);
 	}
 }
@@ -103,67 +142,137 @@ export function requireLocalAuth(tk: TunnelKit): void {
 	}
 }
 
-export async function startQuick(tk: TunnelKit, service: string, autoStopMinutes: number | undefined): Promise<void> {
-	await ensureBinary(tk);
-	const started = await runCancelable(`Starting quick tunnel for ${service}…`, (signal) =>
-		tk.quick.start({ service, autoStopMinutes, signal })
-	);
-	out(`${c.accent('✓')} ${c.accent('quick')} ${c.dim('·')} ${c.url(started.publicUrl)}`);
+export async function startQuick(
+	tk: TunnelKit,
+	service: string,
+	autoStopMinutes: number | undefined,
+	opts: { breadcrumb?: Breadcrumb } = {}
+): Promise<void> {
+	const progress = opts.breadcrumb ? progressScreen({ breadcrumb: opts.breadcrumb }) : undefined;
+	try {
+		await ensureBinary(tk, { breadcrumb: opts.breadcrumb, progress });
+		const started = progress
+			? await runProgress(progress, `Starting quick tunnel for ${service}…`, (signal) =>
+				tk.quick.start({ service, autoStopMinutes, signal })
+			)
+			: await runCancelable(`Starting quick tunnel for ${service}…`, (signal) =>
+				tk.quick.start({ service, autoStopMinutes, signal })
+			);
+		progress?.succeed(`quick · ${started.publicUrl}`);
+		if (!progress) out(`${c.accent('✓')} ${c.accent('quick')} ${c.dim('·')} ${c.url(started.publicUrl)}`);
+	} finally {
+		progress?.stop();
+	}
 }
 
-export async function startRemote(tk: TunnelKit, opts: { id: string; token: string; name?: string; silent?: boolean }): Promise<void> {
-	await ensureBinary(tk);
-	await runCancelable('Starting remote tunnel…', (signal) => tk.remote.start({ ...opts, signal }));
-	if (!opts.silent) out(`${c.accent('✓')} ${c.accent('remote')} ${c.dim('·')} ${c.bold(opts.name ?? opts.id)}`);
+export async function startRemote(
+	tk: TunnelKit,
+	opts: { id: string; token: string; name?: string; silent?: boolean; breadcrumb?: Breadcrumb }
+): Promise<void> {
+	const { breadcrumb, silent, ...startOpts } = opts;
+	const progress = breadcrumb ? progressScreen({ breadcrumb }) : undefined;
+	try {
+		await ensureBinary(tk, { breadcrumb, progress });
+		if (progress) {
+			await runProgress(progress, 'Starting remote tunnel…', (signal) => tk.remote.start({ ...startOpts, signal }));
+			progress.succeed(`remote · ${opts.name ?? opts.id}`);
+		} else {
+			await runCancelable('Starting remote tunnel…', (signal) => tk.remote.start({ ...startOpts, signal }));
+			if (!silent) out(`${c.accent('✓')} ${c.accent('remote')} ${c.dim('·')} ${c.bold(opts.name ?? opts.id)}`);
+		}
+	} finally {
+		progress?.stop();
+	}
 }
 
 export async function startLocalNew(
 	tk: TunnelKit,
 	name: string,
 	routes: { hostname: string; service: string }[],
-	opts: { silent?: boolean } = {}
+	opts: { silent?: boolean; breadcrumb?: Breadcrumb } = {}
 ): Promise<void> {
-	await ensureBinary(tk);
-	requireLocalAuth(tk);
-
-	const createSpin = spinner(`Creating tunnel "${name}"…`);
-	let created;
+	const progress = opts.breadcrumb ? progressScreen({ breadcrumb: opts.breadcrumb }) : undefined;
 	try {
-		created = await tk.local.create(name);
-	} catch (error) {
-		createSpin.stop();
-		throw error;
-	}
-	createSpin.stop(c.dim(`  tunnel id ${created.tunnelId}`));
+		await ensureBinary(tk, { breadcrumb: opts.breadcrumb, progress });
+		requireLocalAuth(tk);
 
-	for (const route of routes) {
-		const dnsSpin = spinner(`Routing ${route.hostname}…`);
-		try {
-			await tk.local.routeDns(name, route.hostname);
-		} catch (error) {
-			dnsSpin.stop();
-			throw error;
+		let created;
+		if (progress) {
+			progress.start(`Creating tunnel "${name}"…`);
+			created = await tk.local.create(name);
+			progress.succeed(`tunnel id ${created.tunnelId}`);
+		} else {
+			const createSpin = spinner(`Creating tunnel "${name}"…`);
+			try {
+				created = await tk.local.create(name);
+			} catch (error) {
+				createSpin.stop();
+				throw error;
+			}
+			createSpin.stop(c.dim(`  tunnel id ${created.tunnelId}`));
 		}
-		dnsSpin.stop(c.dim(`  ${route.hostname} routed`));
-	}
 
-	await runCancelable('Starting local tunnel…', (signal) =>
-		tk.local.start({ id: name, name, tunnelId: created.tunnelId, credentialsFile: created.credentialsFile, ingress: routes }, undefined, { signal })
-	);
-	if (!opts.silent) out(`${c.accent('✓')} ${c.accent('local')} ${c.dim('·')} ${c.bold(name)}`);
+		for (const route of routes) {
+			if (progress) {
+				progress.start(`Routing ${route.hostname}…`);
+				await tk.local.routeDns(name, route.hostname);
+				progress.succeed(`${route.hostname} routed`);
+			} else {
+				const dnsSpin = spinner(`Routing ${route.hostname}…`);
+				try {
+					await tk.local.routeDns(name, route.hostname);
+				} catch (error) {
+					dnsSpin.stop();
+					throw error;
+				}
+				dnsSpin.stop(c.dim(`  ${route.hostname} routed`));
+			}
+		}
+
+		const start = (signal: AbortSignal) =>
+			tk.local.start(
+				{ id: name, name, tunnelId: created.tunnelId, credentialsFile: created.credentialsFile, ingress: routes },
+				undefined,
+				{ signal }
+			);
+		if (progress) {
+			await runProgress(progress, 'Starting local tunnel…', start);
+			progress.succeed(`local · ${name}`);
+		} else {
+			await runCancelable('Starting local tunnel…', start);
+			if (!opts.silent) out(`${c.accent('✓')} ${c.accent('local')} ${c.dim('·')} ${c.bold(name)}`);
+		}
+	} finally {
+		progress?.stop();
+	}
 }
 
 export async function startLocalSaved(
 	tk: TunnelKit,
 	name: string,
-	previous: { tunnelId: string; credentialsFile: string; ingress: { hostname?: string; service: string }[] }
+	previous: { tunnelId: string; credentialsFile: string; ingress: { hostname?: string; service: string }[] },
+	opts: { breadcrumb?: Breadcrumb } = {}
 ): Promise<void> {
-	await ensureBinary(tk);
-	requireLocalAuth(tk);
-	await runCancelable(`Starting saved tunnel "${name}"…`, (signal) =>
-		tk.local.start({ id: name, name, tunnelId: previous.tunnelId, credentialsFile: previous.credentialsFile, ingress: previous.ingress }, undefined, { signal })
-	);
-	out(`${c.accent('✓')} ${c.accent('local')} ${c.dim('·')} ${c.bold(name)}`);
+	const progress = opts.breadcrumb ? progressScreen({ breadcrumb: opts.breadcrumb }) : undefined;
+	try {
+		await ensureBinary(tk, { breadcrumb: opts.breadcrumb, progress });
+		requireLocalAuth(tk);
+		const start = (signal: AbortSignal) =>
+			tk.local.start(
+				{ id: name, name, tunnelId: previous.tunnelId, credentialsFile: previous.credentialsFile, ingress: previous.ingress },
+				undefined,
+				{ signal }
+			);
+		if (progress) {
+			await runProgress(progress, `Starting saved tunnel "${name}"…`, start);
+			progress.succeed(`local · ${name}`);
+		} else {
+			await runCancelable(`Starting saved tunnel "${name}"…`, start);
+			out(`${c.accent('✓')} ${c.accent('local')} ${c.dim('·')} ${c.bold(name)}`);
+		}
+	} finally {
+		progress?.stop();
+	}
 }
 
 // --- Input validation ---

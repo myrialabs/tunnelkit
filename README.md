@@ -156,8 +156,10 @@ tunnelkit install && tunnelkit status
 ```
 
 Run `tunnelkit` with no command in a terminal for a **live control panel** — manage several tunnels
-at once (`↑/↓` select, `n` new, `x` stop, `c` copy URL, `f` forget a saved one, `q` quit). See the
+at once (`[↑/↓]` select, `[n]` new tunnel, `[x]` stop, `[c]` copy URL, `[m]` manage saved, `[q]` quit). See the
 [CLI reference](./docs/cli.md) for every command and flag.
+Interactive wizards use breadcrumbs, one-step `Esc` navigation, and persistent progress logs for
+multi-step work like creating named tunnels and routing DNS.
 
 ## Events
 
