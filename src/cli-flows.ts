@@ -27,7 +27,9 @@ import {
 	startLocalNew,
 	startLocalSaved,
 	validateQuickService,
-	validateMinutes
+	validateMinutes,
+	readVersion,
+	checkForUpdate
 } from './cli-helpers.js';
 
 /**
@@ -35,10 +37,17 @@ import {
  * the user can start more tunnels (`n`), manage saved ones (`m`), or quit.
  * The "add" and "manage" flows run against this same `tk`.
  */
-export function enterSession(tk: TunnelKit): void {
+export async function enterSession(tk: TunnelKit): Promise<void> {
+	const version = readVersion();
+	const updateAvailable = await checkForUpdate(version);
+	const updateMsg = updateAvailable
+		? `Update v${version} → v${updateAvailable} — run \`tunnelkit update\``
+		: undefined;
+
 	runSession(tk, {
 		addTunnel: () => addTunnelFlow(tk),
-		manageSaved: () => manageSavedFlow(tk)
+		manageSaved: () => manageSavedFlow(tk),
+		updateAvailable: updateMsg
 	});
 }
 

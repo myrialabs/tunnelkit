@@ -33,7 +33,7 @@
 import { CloudflaredMissingError } from './cloudflared-tunnel.js';
 import { parseCliArgs, type ParsedArgs } from './cli-args.js';
 import { c, out, errLine, CancelError } from './cli-ui.js';
-import { readVersion, isInteractive, makeKit } from './cli-helpers.js';
+import { readVersion, isInteractive, makeKit, checkForUpdate } from './cli-helpers.js';
 import { enterSession } from './cli-flows.js';
 import { COMMANDS, NAMESPACES } from './cli-commands.js';
 
@@ -77,6 +77,7 @@ ${c.bold('GENERAL')}
   dashboard                    Print a shortcut link to the Cloudflare Tunnels dashboard
   install [version]            Download the cloudflared binary (default: latest)
   status                       Show the cloudflared binary status
+  update                       Check for and apply tunnelkit updates
   version                      Print the tunnelkit version
   help                         Show this help
 
@@ -134,6 +135,10 @@ async function main(): Promise<void> {
 	}
 	if (command === 'version' || command === '-v' || command === '--version') {
 		out(`v${version}`);
+		const latest = await checkForUpdate(version);
+		if (latest && typeof latest === 'string') {
+			out(c.dim(`  Update v${version} → v${latest} — run \`tunnelkit update\``));
+		}
 		return;
 	}
 

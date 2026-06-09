@@ -6,12 +6,14 @@
  */
 
 import { resolveQuickService, CLOUDFLARE_TUNNELS_DASHBOARD_URL } from './tunnelkit.js';
+import { spawn } from 'node:child_process';
 import { c, out, spinner, prompt, confirm } from './cli-ui.js';
 import { firstValue, type ParsedArgs } from './cli-args.js';
 import { extractTunnelToken } from './tunnel-token.js';
 import {
 	makeKit,
 	makeStore,
+	readVersion,
 	isInteractive,
 	ensureBinary,
 	performLogin,
@@ -21,7 +23,9 @@ import {
 	startLocalSaved,
 	validateQuickService,
 	gatherRoutes,
-	parseAutoStop
+	parseAutoStop,
+	checkForUpdate,
+	detectPackageManager
 } from './cli-helpers.js';
 import { enterSession } from './cli-flows.js';
 
@@ -288,6 +292,48 @@ function cmdDashboard(): void {
 	out(c.dim("  Opens the signed-in account's Tunnels page (manage remote & named tunnels).\n"));
 }
 
+async function cmdUpdate(): Promise<void> {
+	const version = readVersion();
+	const latest = await checkForUpdate(version);
+	if (latest === false) {
+		throw new Error('Could not reach the npm registry. Check your internet connection and try again.');
+	}
+	if (latest === null) {
+		out(`${c.accent('✓')} tunnelkit is up to date ${c.dim(`(v${version})`)}`);
+		return;
+	}
+
+	out(`  Update available: ${c.dim(`v${version}`)} → ${c.accent(`v${latest}`)}`);
+
+	const pm = detectPackageManager();
+	const [cmd, ...args] = pm === 'bun'
+		? ['bun', 'add', '-g', 'tunnelkit@latest']
+		: pm === 'yarn'
+			? ['yarn', 'global', 'add', 'tunnelkit@latest']
+			: pm === 'pnpm'
+				? ['pnpm', 'add', '-g', 'tunnelkit@latest']
+				: ['npm', 'install', '-g', 'tunnelkit@latest'];
+
+	const spin = spinner(`Updating via ${pm}…`);
+	try {
+		await new Promise<void>((resolve, reject) => {
+			const proc = spawn(cmd, args, {
+				stdio: ['ignore', 'pipe', 'pipe'],
+				shell: process.platform === 'win32'
+			});
+			proc.on('error', reject);
+			proc.on('exit', (code) => {
+				if (code === 0) resolve();
+				else reject(new Error(`${cmd} exited with code ${code}`));
+			});
+		});
+		spin.stop(c.accent(`✓ Updated to v${latest}`));
+	} catch {
+		spin.stop();
+		throw new Error('Update failed. Run `npm install -g tunnelkit@latest` manually.');
+	}
+}
+
 /** Flat top-level commands (no mode namespace). */
 export const COMMANDS: Record<string, Handler> = {
 	quick: cmdQuick,
@@ -295,7 +341,8 @@ export const COMMANDS: Record<string, Handler> = {
 	forget: cmdForget,
 	install: cmdInstall,
 	status: cmdStatus,
-	dashboard: cmdDashboard
+	dashboard: cmdDashboard,
+	update: cmdUpdate
 };
 
 /** Mode namespaces: `tunnelkit <namespace> <verb> …`. */

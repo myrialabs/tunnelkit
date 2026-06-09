@@ -7,6 +7,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { get } from 'node:https';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
@@ -315,4 +316,70 @@ export function parseAutoStop(parsed: ParsedArgs): number | undefined {
 		throw new Error('--auto-stop must be a non-negative number of minutes (0 disables it)');
 	}
 	return minutes;
+}
+
+// --- Version update check ---
+
+function compareVersions(a: string, b: string): number {
+	const pa = a.split('.').map(Number);
+	const pb = b.split('.').map(Number);
+	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+		const na = pa[i] ?? 0;
+		const nb = pb[i] ?? 0;
+		if (na > nb) return 1;
+		if (na < nb) return -1;
+	}
+	return 0;
+}
+
+async function fetchLatestNpmVersion(): Promise<string | null> {
+	return new Promise<string | null>((resolve) => {
+		const req = get(
+			'https://registry.npmjs.org/tunnelkit/latest',
+			{ headers: { Accept: 'application/json' } },
+			(res) => {
+				let data = '';
+				res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+				res.on('end', () => {
+					try {
+						const json = JSON.parse(data);
+						resolve(typeof json.version === 'string' ? json.version : null);
+					} catch {
+						resolve(null);
+					}
+				});
+			}
+		);
+		req.setTimeout(5000, () => { req.destroy(); resolve(null); });
+		req.on('error', () => resolve(null));
+	});
+}
+
+/**
+ * Check the npm registry for a newer version of tunnelkit.
+ * Returns the latest version string if newer than `currentVersion`,
+ * `null` if already up-to-date, or `false` if the check failed.
+ * The interactive panel treats `false` as silent; the explicit
+ * `update` command uses it to surface a distinct error message.
+ */
+export async function checkForUpdate(currentVersion: string): Promise<string | null | false> {
+	try {
+		const latest = await fetchLatestNpmVersion();
+		if (!latest) return false;
+		return compareVersions(latest, currentVersion) > 0 ? latest : null;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Best-effort detection of which package manager installed tunnelkit,
+ * based on the npm_config_user_agent env var set by npm/bun/yarn/pnpm.
+ */
+export function detectPackageManager(): string {
+	const ua = process.env.npm_config_user_agent ?? '';
+	if (ua.includes('bun')) return 'bun';
+	if (ua.includes('pnpm')) return 'pnpm';
+	if (ua.includes('yarn')) return 'yarn';
+	return 'npm';
 }

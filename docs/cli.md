@@ -34,6 +34,7 @@ Cloudflare account — quick needs nothing and remote runs from a token.
   - [`dashboard`](#dashboard)
   - [`install`](#install)
   - [`status`](#status)
+  - [`update`](#update)
   - [`version` / `help`](#version--help)
 - [Global options](#global-options)
 - [Exit codes](#exit-codes)
@@ -264,6 +265,18 @@ Show whether `cloudflared` is available, its version, and its resolved path.
 ```sh
 tunnelkit status
 ```
+
+### `update`
+
+Check the npm registry for a newer version of tunnelkit. If one is found, it
+auto-detects your package manager (npm, bun, yarn, pnpm) and runs the update.
+
+```sh
+tunnelkit update
+```
+
+The interactive control panel also shows a best-effort update hint (silent on
+failure) when starting a session.
 
 ### `version` / `help`
 

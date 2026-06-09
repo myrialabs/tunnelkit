@@ -780,6 +780,11 @@ export interface SessionHooks {
 	 * while this runs, then resumes. Resolve when done; throw to surface an error.
 	 */
 	manageSaved: () => Promise<void>;
+	/**
+	 * Optional update notification shown in the dashboard when a newer version
+	 * of tunnelkit is available.
+	 */
+	updateAvailable?: string;
 }
 
 /** Visible width of a string, ignoring ANSI colour escapes. */
@@ -902,6 +907,7 @@ export function renderDashboard(opts: {
 	flash: string;
 	termCols: number;
 	now?: number;
+	updateAvailable?: string;
 }): string[] {
 	const body: string[] = [];
 
@@ -962,6 +968,11 @@ export function renderDashboard(opts: {
 	if (opts.flash) {
 		body.push(UI_GAP);
 		body.push(UI_PAD + c.accent2(opts.flash));
+	}
+
+	if (opts.updateAvailable) {
+		body.push(UI_GAP);
+		body.push(UI_PAD + c.dim(opts.updateAvailable));
 	}
 
 	const selected = opts.tunnels[opts.cursor];
@@ -1046,7 +1057,8 @@ export function runSession(tk: TunnelKit, hooks: SessionHooks): void {
 			cursor,
 			stopping,
 			flash,
-			termCols
+			termCols,
+			updateAvailable: hooks.updateAvailable
 		});
 
 		// Repaint from the top of the (alternate) screen, clearing whatever was
