@@ -4,8 +4,8 @@
  * tunnelkit CLI
  *
  * A thin, batteries-included command line over {@link TunnelKit}, so the library
- * can also be used directly from a terminal (`npm i -g tunnelkit` / `bun add -g
- * tunnelkit`). Commands are grouped by the mode they belong to, so it's always
+ * can also be used directly from a terminal (`npm i -g @myrialabs/tunnelkit` / `bun add -g
+ * @myrialabs/tunnelkit`). Commands are grouped by the mode they belong to, so it's always
  * clear which mode an operation is for:
  *
  *   tunnelkit                            Interactive menu (when run in a terminal)

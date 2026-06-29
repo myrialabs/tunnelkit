@@ -74,8 +74,8 @@ git push origin main --tags
 The workflow then runs `npm publish --provenance --access public` (using the `NPM_TOKEN` secret) and creates a GitHub release with generated notes.
 
 **Prerequisites (one-time):**
-- `NPM_TOKEN` repository secret with publish rights to the `tunnelkit` package.
-- The npm package name `tunnelkit` is owned by the org/account behind that token.
+- `NPM_TOKEN` repository secret with publish rights to the `@myrialabs/tunnelkit` package.
+- The npm package name `@myrialabs/tunnelkit` is owned by the org/account behind that token.
 
 **Versioning (semver):** `fix` → patch, `feat` → minor, any breaking public-API change → major (call it out in the PR's `## Breaking changes`).
 

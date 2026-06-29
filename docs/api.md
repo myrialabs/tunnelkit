@@ -3,7 +3,7 @@
 This page documents the programmatic API. For the terminal command, see the
 [CLI reference](./cli.md).
 
-All exports come from the package root: `import { … } from 'tunnelkit'`.
+All exports come from the package root: `import { … } from '@myrialabs/tunnelkit'`.
 
 - [`TunnelKit`](#tunnelkit)
 - [`TunnelStore`](#tunnelstore)

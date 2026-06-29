@@ -44,7 +44,7 @@ import { QuickMode, resolveQuickService } from './modes/quick.js';
 import { RemoteMode } from './modes/remote.js';
 import { LocalMode } from './modes/local.js';
 
-// Re-exported so existing imports (`from 'tunnelkit'` / `./tunnelkit.js`) keep working.
+// Re-exported so existing imports (`from '@myrialabs/tunnelkit'` / `./tunnelkit.js`) keep working.
 export { resolveQuickService };
 
 /**

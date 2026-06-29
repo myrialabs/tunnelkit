@@ -307,12 +307,12 @@ async function cmdUpdate(): Promise<void> {
 
 	const pm = detectPackageManager();
 	const [cmd, ...args] = pm === 'bun'
-		? ['bun', 'add', '-g', 'tunnelkit@latest']
+		? ['bun', 'add', '-g', '@myrialabs/tunnelkit@latest']
 		: pm === 'yarn'
-			? ['yarn', 'global', 'add', 'tunnelkit@latest']
+			? ['yarn', 'global', 'add', '@myrialabs/tunnelkit@latest']
 			: pm === 'pnpm'
-				? ['pnpm', 'add', '-g', 'tunnelkit@latest']
-				: ['npm', 'install', '-g', 'tunnelkit@latest'];
+				? ['pnpm', 'add', '-g', '@myrialabs/tunnelkit@latest']
+				: ['npm', 'install', '-g', '@myrialabs/tunnelkit@latest'];
 
 	const spin = spinner(`Updating via ${pm}…`);
 	try {
@@ -330,7 +330,7 @@ async function cmdUpdate(): Promise<void> {
 		spin.stop(c.accent(`✓ Updated to v${latest}`));
 	} catch {
 		spin.stop();
-		throw new Error('Update failed. Run `npm install -g tunnelkit@latest` manually.');
+		throw new Error('Update failed. Run `npm install -g @myrialabs/tunnelkit@latest` manually.');
 	}
 }
 

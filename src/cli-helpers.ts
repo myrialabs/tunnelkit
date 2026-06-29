@@ -335,7 +335,7 @@ function compareVersions(a: string, b: string): number {
 async function fetchLatestNpmVersion(): Promise<string | null> {
 	return new Promise<string | null>((resolve) => {
 		const req = get(
-			'https://registry.npmjs.org/tunnelkit/latest',
+			'https://registry.npmjs.org/@myrialabs/tunnelkit/latest',
 			{ headers: { Accept: 'application/json' } },
 			(res) => {
 				let data = '';
@@ -356,7 +356,7 @@ async function fetchLatestNpmVersion(): Promise<string | null> {
 }
 
 /**
- * Check the npm registry for a newer version of tunnelkit.
+ * Check the npm registry for a newer version of @myrialabs/tunnelkit.
  * Returns the latest version string if newer than `currentVersion`,
  * `null` if already up-to-date, or `false` if the check failed.
  * The interactive panel treats `false` as silent; the explicit
@@ -373,7 +373,7 @@ export async function checkForUpdate(currentVersion: string): Promise<string | n
 }
 
 /**
- * Best-effort detection of which package manager installed tunnelkit,
+ * Best-effort detection of which package manager installed @myrialabs/tunnelkit,
  * based on the npm_config_user_agent env var set by npm/bun/yarn/pnpm.
  */
 export function detectPackageManager(): string {

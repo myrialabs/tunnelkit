@@ -1,11 +1,11 @@
 # tunnelkit CLI reference
 
-Installing tunnelkit globally exposes a `tunnelkit` command that drives the same three tunnel modes
+Installing @myrialabs/tunnelkit globally exposes a `tunnelkit` command that drives the same three tunnel modes
 as the library — from your terminal, no code.
 
 ```sh
-bun add -g tunnelkit
-# or: npm i -g tunnelkit
+bun add -g @myrialabs/tunnelkit
+# or: npm i -g @myrialabs/tunnelkit
 ```
 
 The CLI needs the `cloudflared` binary. It is downloaded automatically into `~/.tunnelkit/bin` on
@@ -268,7 +268,7 @@ tunnelkit status
 
 ### `update`
 
-Check the npm registry for a newer version of tunnelkit. If one is found, it
+Check the npm registry for a newer version of @myrialabs/tunnelkit. If one is found, it
 auto-detects your package manager (npm, bun, yarn, pnpm) and runs the update.
 
 ```sh

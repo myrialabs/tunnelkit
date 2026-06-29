@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://tunnelkit.myrialabs.dev">Website</a> ·
-  <a href="https://www.npmjs.com/package/tunnelkit">npm</a> ·
+  <a href="https://www.npmjs.com/package/@myrialabs/tunnelkit">npm</a> ·
   <a href="./docs/api.md">API reference</a> ·
   <a href="./docs/cli.md">CLI reference</a> ·
   <a href="./examples/README.md">Examples</a> ·
@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/tunnelkit"><img src="https://img.shields.io/npm/v/tunnelkit" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@myrialabs/tunnelkit"><img src="https://img.shields.io/npm/v/@myrialabs%2Ftunnelkit" alt="npm version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/runtime-Node%2018%2B%20%7C%20Bun-black" alt="Node 18+ and Bun" />
 </p>
@@ -56,8 +56,8 @@ tunnelkit quick 3000
 | Local | `tk.local.start({ id, name, tunnelId, credentialsFile, ingress })` | `tunnelkit local run <name> --route <host>=<service>` |
 
 ```sh
-bun add tunnelkit          # library
-bun add -g tunnelkit       # CLI
+bun add @myrialabs/tunnelkit          # library
+bun add -g @myrialabs/tunnelkit      # CLI
 ```
 
 `cloudflared` is downloaded on first use, or use one already on `PATH`.
@@ -242,7 +242,7 @@ tunnelkit install [version]
 ## Low-level API
 
 ```ts
-import { CloudflaredTunnel } from 'tunnelkit';
+import { CloudflaredTunnel } from '@myrialabs/tunnelkit';
 const tunnel = CloudflaredTunnel.quick('http://localhost:3000');
 tunnel.on('url', (url) => console.log(url));
 ```
