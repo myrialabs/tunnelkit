@@ -6,6 +6,7 @@
  * `tk.quick` on a {@link TunnelKit}.
  */
 
+import { PendingStops } from './pending-stops.js';
 import { CloudflaredTunnel } from '../cloudflared-tunnel.js';
 import type { ActiveTunnel, ProgressCallback } from '../types.js';
 import { waitForStart, ConnectionTracker, type ManagerContext } from './context.js';
@@ -40,6 +41,7 @@ interface QuickTunnelHandle {
 
 export class QuickMode {
 	private readonly tunnels = new Map<string, QuickTunnelHandle>();
+	private readonly stops = new PendingStops<string>();
 
 	constructor(private readonly ctx: ManagerContext) {}
 
@@ -54,6 +56,7 @@ export class QuickMode {
 		const binaryPath = this.ctx.requireBinary(onProgress);
 		const timings: Record<string, number> = {};
 
+		await this.stops.wait(service);
 		const existing = this.tunnels.get(service);
 		if (existing) {
 			return { id, service, publicUrl: existing.publicUrl, timings };
@@ -75,7 +78,7 @@ export class QuickMode {
 		tunnel.on('error', (error) => this.ctx.log.error(`[quick:${service}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[quick:${service}] exit code ${code}`);
-			this.tunnels.delete(service);
+			if (this.tunnels.get(service)?.tunnel === tunnel) this.tunnels.delete(service);
 			this.ctx.emitStatus();
 		});
 
@@ -124,17 +127,19 @@ export class QuickMode {
 			typeof service === 'string' && service.startsWith('quick:') ? service.slice('quick:'.length) : service
 		);
 		const instance = this.tunnels.get(key);
-		if (!instance) return;
+		if (!instance) return this.stops.wait(key);
 
 		if (instance.autoStopTimer) clearTimeout(instance.autoStopTimer);
+		let stopped: Promise<void> = Promise.resolve();
 		try {
-			instance.tunnel.stop();
+			stopped = instance.tunnel.stop();
 		} catch (err) {
 			this.ctx.log.warn(`Failed to stop quick tunnel for ${key}:`, err);
 		}
 		this.tunnels.delete(key);
-		this.ctx.log.log(`Quick tunnel stopped for ${key}`);
 		this.ctx.emitStatus();
+		await this.stops.track(key, stopped);
+		this.ctx.log.log(`Quick tunnel stopped for ${key}`);
 	}
 
 	/** Whether a quick tunnel is running for the given port/service. */

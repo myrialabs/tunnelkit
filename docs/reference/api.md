@@ -122,8 +122,8 @@ Remote and local tunnels are auto-saved on start (quick tunnels are not). Read t
 
 ```ts
 tk.list(): ActiveTunnel[]                              // every running tunnel, all modes
-tk.stop(id: string): Promise<void>                     // stop a single tunnel by id
-tk.stopAll(): Promise<void>                            // stop every managed tunnel
+tk.stop(id: string): Promise<void>                     // stop a single tunnel by id; resolves once cloudflared exited
+tk.stopAll(): Promise<void>                            // stop every managed tunnel; resolves once all exited
 tk.restoreAll(): Promise<{ remotes: number; locals: number }>  // start all saved tunnels
 ```
 
@@ -189,7 +189,7 @@ CloudflaredTunnel.withConfig(configPath: string, binaryPath?: string): Cloudflar
 
 ```ts
 tunnel.process            // the underlying ChildProcess
-tunnel.stop(): boolean    // SIGINT the process
+tunnel.stop(graceMs?): Promise<void>  // SIGINT; resolves once the process exited, SIGKILL after graceMs (default 5000)
 tunnel.addHandler(fn)     // register a custom output parser
 ```
 

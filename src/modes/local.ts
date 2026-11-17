@@ -8,6 +8,7 @@
  * `tk.local` on a {@link TunnelKit}.
  */
 
+import { PendingStops } from './pending-stops.js';
 import { existsSync, mkdirSync, renameSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
@@ -35,6 +36,7 @@ function isTunnelNameConflict(error: unknown): boolean {
 
 export class LocalMode {
 	private readonly tunnels = new Map<string, LocalTunnelHandle>();
+	private readonly stops = new PendingStops<string>();
 	private loginHandle: LoginHandle | null = null;
 
 	constructor(private readonly ctx: ManagerContext) {}
@@ -276,6 +278,7 @@ export class LocalMode {
 		const binaryPath = this.ctx.requireBinary(onProgress);
 		const timings: Record<string, number> = {};
 
+		await this.stops.wait(config.id);
 		const running = this.tunnels.get(config.id);
 		if (running) {
 			return { ingress: running.ingress, timings };
@@ -303,7 +306,7 @@ export class LocalMode {
 		tunnel.on('error', (error) => this.ctx.log.error(`[local:${config.name}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[local:${config.name}] exit code ${code}`);
-			this.tunnels.delete(config.id);
+			if (this.tunnels.get(config.id)?.tunnel === tunnel) this.tunnels.delete(config.id);
 			this.ctx.emitStatus();
 		});
 
@@ -344,16 +347,18 @@ export class LocalMode {
 
 	async stop(id: string): Promise<void> {
 		const handle = this.tunnels.get(id);
-		if (!handle) return;
+		if (!handle) return this.stops.wait(id);
 
+		let stopped: Promise<void> = Promise.resolve();
 		try {
-			handle.tunnel.stop();
+			stopped = handle.tunnel.stop();
 		} catch (err) {
 			this.ctx.log.warn(`Failed to stop local tunnel ${handle.name}:`, err);
 		}
 		this.tunnels.delete(id);
-		this.ctx.log.log(`Local tunnel stopped: ${handle.name}`);
 		this.ctx.emitStatus();
+		await this.stops.track(id, stopped);
+		this.ctx.log.log(`Local tunnel stopped: ${handle.name}`);
 	}
 
 	isActive(id: string): boolean {

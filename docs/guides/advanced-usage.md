@@ -86,7 +86,7 @@ tunnel.on('connected', (info) => console.log('Edge up:', info.location));
 tunnel.on('stderr', (data) => console.error(data));
 
 // Later:
-tunnel.stop();
+await tunnel.stop(); // resolves once cloudflared has exited
 ```
 
 The same class also exposes the one-shot account commands every mode calls

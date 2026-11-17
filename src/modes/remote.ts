@@ -8,6 +8,7 @@
  * {@link TunnelKit}.
  */
 
+import { PendingStops } from './pending-stops.js';
 import { CloudflaredTunnel } from '../cloudflared-tunnel.js';
 import type { ActiveTunnel, IngressInfo, ProgressCallback } from '../types.js';
 import { waitForStart, ConnectionTracker, type ManagerContext } from './context.js';
@@ -23,6 +24,7 @@ interface RemoteTunnelHandle {
 
 export class RemoteMode {
 	private readonly tunnels = new Map<string, RemoteTunnelHandle>();
+	private readonly stops = new PendingStops<string>();
 
 	constructor(private readonly ctx: ManagerContext) {}
 
@@ -35,6 +37,7 @@ export class RemoteMode {
 		const binaryPath = this.ctx.requireBinary(onProgress);
 		const timings: Record<string, number> = {};
 
+		await this.stops.wait(opts.id);
 		const running = this.tunnels.get(opts.id);
 		if (running) {
 			return { ingress: running.ingress, timings };
@@ -74,7 +77,7 @@ export class RemoteMode {
 		tunnel.on('error', (error) => this.ctx.log.error(`[remote:${name}] error:`, error));
 		tunnel.on('exit', (code) => {
 			this.ctx.log.log(`[remote:${name}] exit code ${code}`);
-			this.tunnels.delete(opts.id);
+			if (this.tunnels.get(opts.id)?.tunnel === tunnel) this.tunnels.delete(opts.id);
 			this.ctx.emitStatus();
 		});
 
@@ -101,16 +104,18 @@ export class RemoteMode {
 
 	async stop(id: string): Promise<void> {
 		const handle = this.tunnels.get(id);
-		if (!handle) return;
+		if (!handle) return this.stops.wait(id);
 
+		let stopped: Promise<void> = Promise.resolve();
 		try {
-			handle.tunnel.stop();
+			stopped = handle.tunnel.stop();
 		} catch (err) {
 			this.ctx.log.warn(`Failed to stop remote tunnel ${handle.name}:`, err);
 		}
 		this.tunnels.delete(id);
-		this.ctx.log.log(`Remote tunnel stopped: ${handle.name}`);
 		this.ctx.emitStatus();
+		await this.stops.track(id, stopped);
+		this.ctx.log.log(`Remote tunnel stopped: ${handle.name}`);
 	}
 
 	/** The most recent ingress rules pushed by Cloudflare for a running tunnel. */

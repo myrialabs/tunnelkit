@@ -155,6 +155,9 @@ export interface CloudflaredTunnel {
 	emit<K extends keyof CloudflaredTunnelEvents>(event: K, ...args: CloudflaredTunnelEvents[K]): boolean;
 }
 
+/** How long `stop()` lets cloudflared drain before killing it (ms). */
+export const DEFAULT_STOP_GRACE_MS = 5000;
+
 export class CloudflaredTunnel extends EventEmitter {
 	private _process: ChildProcess;
 	private outputHandlers: OutputHandler[] = [];
@@ -171,9 +174,41 @@ export class CloudflaredTunnel extends EventEmitter {
 		return this._process;
 	}
 
-	/** Stop the tunnel process. */
-	stop(): boolean {
-		return this._process.kill('SIGINT');
+	private stopping: Promise<void> | null = null;
+
+	/**
+	 * Stop the tunnel process; resolves once it has exited.
+	 *
+	 * cloudflared drains its connections on SIGINT before exiting, which takes
+	 * seconds. Callers used to get `true` back at once while the process kept
+	 * running — a shutdown that "finished" left it holding the tunnel. After
+	 * `graceMs` without an exit it is killed outright.
+	 */
+	stop(graceMs = DEFAULT_STOP_GRACE_MS): Promise<void> {
+		const proc = this._process;
+		if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
+		if (!this.stopping) {
+			this.stopping = new Promise<void>((resolve) => {
+				const timer = setTimeout(() => {
+					try {
+						proc.kill('SIGKILL');
+					} catch {
+						// Already gone.
+					}
+				}, graceMs);
+				timer.unref?.();
+				proc.once('exit', () => {
+					clearTimeout(timer);
+					resolve();
+				});
+			});
+			try {
+				proc.kill('SIGINT');
+			} catch {
+				// Already gone; the exit listener resolves.
+			}
+		}
+		return this.stopping;
 	}
 
 	/** Register a custom output handler. */
