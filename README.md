@@ -12,8 +12,8 @@
 <p align="center">
   <a href="https://tunnelkit.myrialabs.dev">Website</a> ·
   <a href="https://www.npmjs.com/package/@myrialabs/tunnelkit">npm</a> ·
-  <a href="./docs/api.md">API reference</a> ·
-  <a href="./docs/cli.md">CLI reference</a> ·
+  <a href="./docs/reference/api.md">API reference</a> ·
+  <a href="./docs/operations/cli.md">CLI reference</a> ·
   <a href="./examples/README.md">Examples</a> ·
   <a href="https://github.com/myrialabs/tunnelkit/issues">Issues</a>
 </p>
@@ -162,7 +162,7 @@ saved configs.
   [m] manage saved   [q] quit
 ```
 
-See the [CLI reference](./docs/cli.md) for all keybindings.
+See the [CLI reference](./docs/operations/cli.md) for all keybindings.
 
 ## Events
 
@@ -259,8 +259,9 @@ From the CLI, `Ctrl+C` / `q` stops everything.
 
 ## Documentation
 
-- [API reference](./docs/api.md) — every export, option, method, and event.
-- [CLI reference](./docs/cli.md) — every command, option, and example.
+- [Docs index](./docs/README.md) — full documentation map.
+- [API reference](./docs/reference/api.md) — every export, option, method, and event.
+- [CLI reference](./docs/operations/cli.md) — every command, option, and example.
 - [Examples](./examples/README.md) — runnable scenarios.
 
 ## License

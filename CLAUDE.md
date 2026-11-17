@@ -68,8 +68,10 @@ from `src/index.ts`, and exposes the `tunnelkit` command through
 - `src/cli-commands.ts` - non-interactive command handlers.
 - `src/cli-flows.ts` - interactive control panel and wizards.
 - `src/cli-ui.ts` - terminal rendering, colors, prompts, and clipboard helpers.
-- `docs/api.md`, `docs/cli.md`, `examples/` - public documentation and usage
-  examples.
+- `docs/reference/api.md`, `docs/operations/cli.md`, `examples/` - public
+  documentation and usage examples. `docs/README.md` indexes the full
+  documentation taxonomy (getting-started, essential, operations, guides,
+  reference).
 
 Do not refer to old file names such as `src/tunnel.ts`, `src/manager.ts`, or
 `src/modes/shared.ts`; they are not part of the current structure.
@@ -117,8 +119,8 @@ change only touched docs.
 
 ## Public Surface Rules
 
-- Public API changes require updates to `README.md` and `docs/api.md`.
-- CLI changes require updates to `README.md` and `docs/cli.md`.
+- Public API changes require updates to `README.md` and `docs/reference/api.md`.
+- CLI changes require updates to `README.md` and `docs/operations/cli.md`.
 - Examples should stay aligned with the documented API.
 - `README.md` may be dirty from user edits; do not overwrite it unless the task
   explicitly requires it.

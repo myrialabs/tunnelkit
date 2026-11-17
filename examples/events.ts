@@ -30,7 +30,7 @@ tk.on('status-changed', (tunnels) => {
 // Fires as each individual edge link comes up or goes down.
 // A non-empty connections list means the tunnel is publicly reachable.
 tk.on('connection', ({ id, info, status }) => {
-	console.log(`[${id}] edge ${status}: ${info.location.colo} (${info.location.ip})`);
+	console.log(`[${id}] edge ${status}: ${info.location} (${info.ip})`);
 });
 
 await tk.quick.start({ service });

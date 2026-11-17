@@ -1,7 +1,7 @@
 # tunnelkit API reference
 
 This page documents the programmatic API. For the terminal command, see the
-[CLI reference](./cli.md).
+[CLI reference](../operations/cli.md).
 
 All exports come from the package root: `import { … } from '@myrialabs/tunnelkit'`.
 
@@ -55,19 +55,20 @@ itself.
 ### Quick tunnel — `tk.quick`
 
 ```ts
-tk.quick.start(opts: { service: string | number; autoStopMinutes?: number }, onProgress?: ProgressCallback)
+tk.quick.start(opts: { service: string | number; autoStopMinutes?: number; signal?: AbortSignal }, onProgress?: ProgressCallback)
   : Promise<{ id: string; service: string; publicUrl: string; timings: Record<string, number> }>
 tk.quick.stop(service: string | number): Promise<void>
 tk.quick.isActive(service: string | number): boolean
 ```
 
 `service` accepts a bare port (`3000` → `http://localhost:3000`) or a full URL. `tk.quick.stop`
-accepts the same port/URL you started with, or the returned `id` (`quick:<service>`).
+accepts the same port/URL you started with, or the returned `id` (`quick:<service>`). `signal`
+aborts an in-progress start — see [Advanced usage](../guides/advanced-usage.md#aborting-a-start-with-abortsignal).
 
 ### Remote tunnel — `tk.remote`
 
 ```ts
-tk.remote.start(opts: { id: string; token: string; name?: string }, onProgress?: ProgressCallback)
+tk.remote.start(opts: { id: string; token: string; name?: string; signal?: AbortSignal }, onProgress?: ProgressCallback)
   : Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }>
 tk.remote.stop(id: string): Promise<void>
 tk.remote.ingress(id: string): IngressInfo[]
@@ -95,7 +96,7 @@ tk.local.writeConfig(config: { tunnelId; credentialsFile; ingress }): string  //
 tk.local.list(): Promise<TunnelListEntry[]>
 
 // Running
-tk.local.start(config: LocalTunnelConfig, onProgress?: ProgressCallback)
+tk.local.start(config: LocalTunnelConfig, onProgress?: ProgressCallback, opts?: { signal?: AbortSignal })
   : Promise<{ ingress: IngressInfo[]; timings: Record<string, number> }>
 tk.local.stop(id: string): Promise<void>
 tk.local.isActive(id: string): boolean

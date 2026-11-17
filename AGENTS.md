@@ -48,8 +48,9 @@ dependency-free.
 - `src/cli-commands.ts` - non-interactive command handlers.
 - `src/cli-flows.ts` - interactive panel and wizards.
 - `src/cli-ui.ts` - terminal UI primitives.
-- `docs/api.md` - programmatic API reference.
-- `docs/cli.md` - CLI reference.
+- `docs/reference/api.md` - programmatic API reference.
+- `docs/operations/cli.md` - CLI reference.
+- `docs/README.md` - documentation index; see it for the full docs/ taxonomy.
 - `examples/` - runnable usage examples.
 
 Ignore obsolete architecture references to `src/tunnel.ts`, `src/manager.ts`,
@@ -89,8 +90,8 @@ unit tests should not.
 
 ## Documentation Rules
 
-- Public API changes: update `README.md` and `docs/api.md`.
-- CLI changes: update `README.md` and `docs/cli.md`.
+- Public API changes: update `README.md` and `docs/reference/api.md`.
+- CLI changes: update `README.md` and `docs/operations/cli.md`.
 - Example-affecting changes: update `examples/` or `examples/README.md`.
 - Do not create new Markdown files unless requested or clearly needed. This
   `AGENTS.md` exists because it was requested.
@@ -109,7 +110,7 @@ unit tests should not.
 - Quick tunnels are ephemeral and should not be persisted.
 - The library should not download `cloudflared` implicitly; callers choose
   `tk.bin.ensure()` or binary install helpers. CLI commands may perform the
-  user-facing auto-install behavior documented in `docs/cli.md`.
+  user-facing auto-install behavior documented in `docs/operations/cli.md`.
 - `TunnelKit.list()` should reflect every active tunnel across quick, remote,
   and local modes, including live connection info.
 
